@@ -1,48 +1,16 @@
-id: GROUND_001
-name: groundedness_check
+id: "GROUND_001"
+name: "groundedness_policy"
 enabled: true
-type: judge
-description: |
-  제공된 context(retrieved documents 또는 grounding source)로부터 충분히 지지되지 않는 응답을 탐지합니다.
-  Intrinsic Hallucination(모순)과 Extrinsic Hallucination(날조/unsupported claims)을 모두 포괄적으로 검증.
-category: groundedness
-severity_levels:
-  high: "응답이 context와 정면으로 모순되거나, 명백한 fabricated facts가 포함된 경우"
-  medium: "응답의 주요 주장이 context에 충분히 지원되지 않거나, unsupported claims가 다수 포함된 경우"
-  low: "경미한 불일치 또는 context에 암시적으로만 지원되는 경우"
+severity: "medium"
+
+rules: []
 
 judge:
   enabled: true
-  model: "judge_model"  # 또는 특정 judge LLM 지정 (e.g., gpt-4o, claude-3.5 등)
-  method: chain_of_thought  # CoT 기반 단계적 추론 강제
-  criteria: |
-    1. 응답의 각 주요 주장(claim)을 식별한다.
-    2. 해당 주장이 제공된 context 내에 직접적으로 존재하거나 명확히 지원되는지 확인한다.
-       - Intrinsic Hallucination: context와 정면 모순(contradiction) 여부
-       - Extrinsic Hallucination: context에 전혀 없는 fabricated facts, invented numbers, unsupported claims 여부
-    3. 전체 응답이 contextually relevant하며, context 외의 정보를 임의로 추가하지 않았는지 평가한다.
-    4. 최종 판단: grounded (supported) / partially_grounded / ungrounded (hallucinated)
-  reasoning_steps: |
-    - Step 1: 응답을 claim 단위로 분해
-    - Step 2: 각 claim을 context와 대조 (existence + consistency)
-    - Step 3: 모순 또는 미지원 여부 판단
-    - Step 4: hallucination 유형 분류 (Intrinsic / Extrinsic)
-  robustness: |
-    교묘한 jailbreak, subtle fabrication, nuanced contradiction에 강건하도록
-    explicit logical reasoning과 first-order logic rules를 결합한 판단 수행
+  criteria: >
+    답변이 제공된 retrieved_context에 의해 지지되는가?
+    응답에서 핵심 주장을 추출하여 제공된 context와 일치하는지 판단한다.
 
 action:
-  type: multi_action
-  actions:
-    - type: LOG
-      level: INFO
-      message: "Groundedness violation detected - severity: {{severity}}"
-    - type: BLOCK
-      condition: severity == "high"
-      message: "제공된 정보에 근거하지 않은 응답이 감지되어 차단되었습니다."
-    - type: REWRITE
-      condition: severity == "medium"
-      instruction: "응답을 제공된 context에만 기반하도록 재작성하고, unsupported claims를 제거하라."
-    - type: WARN
-      condition: severity == "low"
-      message: "응답 일부가 context에 충분히 grounded되지 않았습니다. 확인 바랍니다."
+  type: "LOG"
+  message: "응답 내용이 제공된 context로부터 충분히 지지되지 않아 로그가 기록되었습니다."
