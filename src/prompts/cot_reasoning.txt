@@ -1,0 +1,4 @@
+1. Identify the relevant policy.
+2. Compare the response against retrieved context or format rules.
+3. Return PASS or FAIL with a concise reason.
+

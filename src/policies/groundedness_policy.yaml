@@ -1,0 +1,13 @@
+id: GROUND_001
+name: groundedness_check
+enabled: true
+type: judge
+rules: []
+judge:
+  enabled: true
+  criteria: "Check whether the response is supported by the provided context."
+action:
+  type: LOG
+  message: "Potential lack of evidence was detected."
+severity: medium
+

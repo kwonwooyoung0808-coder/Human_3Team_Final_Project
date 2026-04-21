@@ -1,0 +1,10 @@
+examples:
+  - input: "This is supported by context."
+    context:
+      - "This is supported by context."
+    output:
+      verdict: PASS
+      confidence: 0.9
+      reason: "The response is supported by the provided context."
+      evidence_text: "This is supported by context."
+

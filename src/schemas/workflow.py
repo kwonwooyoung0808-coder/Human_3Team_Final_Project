@@ -1,0 +1,57 @@
+from datetime import datetime
+from typing import Any, Literal
+from uuid import uuid4
+
+from pydantic import BaseModel, Field, model_validator
+
+from src.schemas.violation import Violation
+
+
+class EvaluateRequest(BaseModel):
+    run_id: str | None = None
+    input: str
+    response: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    retrieved_context: list[str] | None = None
+
+    @model_validator(mode="after")
+    def ensure_run_id(self) -> "EvaluateRequest":
+        if not self.run_id:
+            self.run_id = f"run_{uuid4().hex[:12]}"
+        return self
+
+
+class EvaluateResponse(BaseModel):
+    run_id: str
+    has_violation: bool
+    final_action: Literal["BLOCK", "LOG"]
+    final_response: str
+    violations: list[Violation] = Field(default_factory=list)
+
+
+class TraceNodeRead(BaseModel):
+    id: int
+    run_id: str
+    workflow_name: str
+    node_name: str
+    node_type: str
+    latency_ms: float
+    status: str
+    created_at: datetime
+
+
+class RunTraceSummary(BaseModel):
+    run_id: str
+    workflow_name: str
+    status: str
+    nodes: list[TraceNodeRead]
+    created_at: datetime | None = None
+
+
+class WorkflowState(BaseModel):
+    run_id: str
+    user_input: str
+    final_response: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    retrieved_context: list[str] | None = None
+

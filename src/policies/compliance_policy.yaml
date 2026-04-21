@@ -1,0 +1,16 @@
+id: COMP_001
+name: instruction_compliance
+enabled: true
+type: hybrid
+rules:
+  - condition: required_format
+    parameters:
+      format: JSON
+judge:
+  enabled: true
+  criteria: "Check whether the response follows the required output format."
+action:
+  type: BLOCK
+  message: "The response was blocked because it violated the required format."
+severity: high
+
