@@ -1,6 +1,7 @@
 id: "GROUND_001"
 name: "groundedness_policy"
 enabled: true
+type: "judge"
 severity: "medium"
 
 rules: []
