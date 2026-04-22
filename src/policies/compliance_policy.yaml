@@ -1,16 +1,20 @@
-id: COMP_001
-name: instruction_compliance
+id: "COMP_001"
+name: "instruction_compliance"
 enabled: true
-type: hybrid
-rules:
-  - condition: required_format
-    parameters:
-      format: JSON
-judge:
-  enabled: true
-  criteria: "Check whether the response follows the required output format."
-action:
-  type: BLOCK
-  message: "The response was blocked because it violated the required format."
-severity: high
+severity: "high"
 
+rules:
+  - condition: "format_validation"
+    parameters:
+      required_formats:
+        - "JSON"
+        - "MARKDOWN_TABLE"
+      forbidden_formats:
+        - "PLAIN_TEXT_WITH_MARKDOWN"
+
+judge:
+  enabled: false
+
+action:
+  type: "BLOCK"
+  message: "요구된 출력 형식을 준수하지 않아 응답이 차단되었습니다."

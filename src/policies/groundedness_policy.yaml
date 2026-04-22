@@ -1,13 +1,16 @@
-id: GROUND_001
-name: groundedness_check
+id: "GROUND_001"
+name: "groundedness_policy"
 enabled: true
-type: judge
+severity: "medium"
+
 rules: []
+
 judge:
   enabled: true
-  criteria: "Check whether the response is supported by the provided context."
-action:
-  type: LOG
-  message: "Potential lack of evidence was detected."
-severity: medium
+  criteria: >
+    답변이 제공된 retrieved_context에 의해 지지되는가?
+    응답에서 핵심 주장을 추출하여 제공된 context와 일치하는지 판단한다.
 
+action:
+  type: "LOG"
+  message: "응답 내용이 제공된 context로부터 충분히 지지되지 않아 로그가 기록되었습니다."

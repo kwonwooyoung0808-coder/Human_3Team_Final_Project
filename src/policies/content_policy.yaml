@@ -1,21 +1,29 @@
-id: CONTENT_001
-name: content_safety
+id: "CONTENT_001"
+name: "content_safety"
 enabled: true
-type: hybrid
-rules:
-  - condition: contains_forbidden_words
-    parameters:
-      forbidden_words:
-        - 불법
-        - 폭력
-        - 차별
-        - 협박
-        - 살인
-judge:
-  enabled: true
-  criteria: "Detect explicitly harmful or forbidden content."
-action:
-  type: BLOCK
-  message: "The response was blocked because it violated a content policy."
-severity: high
+type: "rule"
+severity: "high"
 
+rules:
+  - condition: "contains_forbidden_words"
+    parameters:
+      case_insensitive: true
+      forbidden_words:
+        - "불법"
+        - "폭력"
+        - "차별"
+        - "협박"
+        - "살인"
+        - "테러"
+        - "자살"
+        - "자해"
+        - "성착취"
+        - "포르노"
+        # 필요에 따라 핵심 단어만 추가
+
+judge:
+  enabled: false
+
+action:
+  type: "BLOCK"
+  message: "정책 위반으로 응답이 차단되었습니다. 해당 주제는 도와드릴 수 없습니다."
