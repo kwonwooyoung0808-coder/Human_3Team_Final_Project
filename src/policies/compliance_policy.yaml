@@ -1,6 +1,7 @@
 id: "COMP_001"
 name: "instruction_compliance"
 enabled: true
+type: "rule"
 severity: "high"
 
 rules:
