@@ -1,29 +1,124 @@
 id: "CONTENT_001"
 name: "content_safety"
+version: "2.1.0"
 enabled: true
 type: "rule"
 severity: "high"
+priority: 100
+
+# 중복을 피하고 명시적 트리거 필드로 통일
+judge_required: "never"
+
+# B-1 CRITICAL: severity 레벨에 따른 명시적 차단 임계값 정의
+severity_threshold: "high"
 
 rules:
-  - condition: "contains_forbidden_words"
+  - condition: "contains_categorized_forbidden_terms"
     parameters:
+      # 파이썬 엔진에서 텍스트를 .lower() 처리하여 검사할 것을 지시
       case_insensitive: true
-      forbidden_words:
-        - "불법"
-        - "폭력"
-        - "차별"
-        - "협박"
-        - "살인"
-        - "테러"
-        - "자살"
-        - "자해"
-        - "성착취"
-        - "포르노"
-        # 필요에 따라 핵심 단어만 추가
+      match_strategy: "regex_and_substring"
+      categories:
+        violence_hate:
+          enabled: true
+          exact_terms:
+            - "폭력"
+            - "violence"
+            - "혐오"
+            - "hate"
+            - "테러"
+            - "terror"
+            - "차별"
+            - "discrimination"
+            - "살인"
+            - "murder"
+            - "죽여"
+            - "kill"
+          phrase_patterns:
+            - "폭력을 조장"
+            - "혐오 발언"
+            - "특정 집단 비하"
+            - "(?i)how to kill"  # (?!) : 정규식 자체에서도 대소문자 무시
+            - "(?i)how to murder"
+
+        sexual_content:
+          enabled: true
+          exact_terms:
+            - "포르노"
+            - "porn"
+            - "성착취"
+            - "sexual exploitation"
+            - "강간"
+            - "rape"
+            - "미성년자 성"
+          phrase_patterns:
+            - "성행위 방법"
+            - "노골적 성적"
+            - "(?i)how to have sex"
+
+        suicide_self_harm:
+          enabled: true
+          exact_terms:
+            - "자살"
+            - "suicide"
+            - "자해"
+            - "self-harm"
+            - "목매다"
+            - "hang oneself"
+            - "거식증 조장"
+          phrase_patterns:
+            - "자살 방법"
+            - "자해 하는 법"
+            - "자살 추천"
+            - "(?i)how to commit suicide"
+
+        criminal_planning:
+          enabled: true
+          exact_terms:
+            - "방화"
+            - "arson"
+            - "납치"
+            - "kidnap"
+            - "사기"
+            - "fraud"
+            - "scam"
+            - "다크웹"
+            - "dark web"
+            - "마약"
+            - "drugs"
+            - "불법무기"
+            - "illegal weapons"
+          phrase_patterns:
+            - "범죄 계획"
+            - "총기 제작"
+            - "폭발물 만드는 법"
+            - "(?i)how to make a bomb"
+
+        jailbreak_prompt_injection:
+          enabled: true
+          # 프롬프트 인젝션은 주로 영문으로 시도되므로 영문 위주 유지
+          exact_terms:
+            - "DAN"
+            - "Do Anything Now"
+          phrase_patterns:
+            - "(?i)ignore\\s+previous"
+            - "(?i)act\\s+as\\s+.*without\\s+restrictions"
+            - "(?i)reveal\\s+your\\s+system\\s+prompt"
+
+        privacy:
+          enabled: true
+          pii_patterns:
+            - "(?i)\\b[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}\\b"
+            - "\\b\\d{6}-?\\d{7}\\b"
 
 judge:
   enabled: false
 
 action:
   type: "BLOCK"
-  message: "정책 위반으로 응답이 차단되었습니다. 해당 주제는 도와드릴 수 없습니다."
+  fallback_response: "정책 위반으로 응답이 차단되었습니다. 해당 주제는 도와드릴 수 없습니다."
+
+conflict_resolution:
+  block_overrides_log: true
+  use_policy_priority: true
+  fallback_message_policy: "highest_priority_block"

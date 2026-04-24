@@ -1,21 +1,43 @@
 id: "COMP_001"
 name: "instruction_compliance"
+version: "1.2.0"
 enabled: true
 type: "rule"
 severity: "high"
+priority: 90
+
+# A-7 MEDIUM 해소: 중복을 피하고 명시적 트리거 필드로 통일
+judge_required: "never"
+
+# 명확한 상태 정의: Instruction Compliance는 검색된 문서 데이터가 불필요함
+preconditions:
+  requires_retrieved_context: false
 
 rules:
   - condition: "format_validation"
+    # B-1 연관 문제 해소: Rule 실패(포맷 불일치) 시 Judge 2차 검증 없이 즉시 차단
+    on_rule_failure: "block_immediately"
     parameters:
       required_formats:
         - "JSON"
         - "MARKDOWN_TABLE"
       forbidden_formats:
         - "PLAIN_TEXT_WITH_MARKDOWN"
+      # PRD 명세 기준의 구체적인 포맷 검증 방식 정의 (policy_engine.py 구현 가이드)
+      validation_rules:
+        JSON: "json.loads(response) 예외 없이 파싱 성공 여부 확인"
+        MARKDOWN_TABLE: "응답 내에 '|' 문자로 시작하는 행이 2개 이상 존재하는지 확인"
+        PLAIN_TEXT_WITH_MARKDOWN: "'#', '**', '`' 등 마크다운 특수 기호 패턴 포함 여부 확인"
 
 judge:
   enabled: false
 
 action:
   type: "BLOCK"
-  message: "요구된 출력 형식을 준수하지 않아 응답이 차단되었습니다."
+  # 앞선 content_policy 구조와 일관성을 맞추기 위해 필드명 통일
+  fallback_response: "요구된 출력 형식을 준수하지 않아 응답이 차단되었습니다."
+
+conflict_resolution:
+  block_overrides_log: true
+  use_policy_priority: true
+  fallback_message_policy: "highest_priority_block"
