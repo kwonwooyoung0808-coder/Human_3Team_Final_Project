@@ -147,39 +147,44 @@ class PolicyEngine:
         return False, None, ""
 
     def _evaluate_format_compliance(self, rule, response: str, policy_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-        """
-        [validation_rules 준수 검증]
-        JSON 파싱, Markdown Table 문법 검사 등 출력 포맷 형식을 강제합니다.
-        """
         params = rule.parameters
         required = params.get("required_formats", [])
         forbidden = params.get("forbidden_formats", [])
 
-        # 1. 필수 포맷(Required) 위반 검사
-        if "JSON" in required:
-            try:
-                json.loads(response)
-            except json.JSONDecodeError:
-                return self._create_format_span(response, rule, policy_id, "Response is not valid JSON syntax.")
+        # 필수 포맷 검사: 하나라도 만족하면 통과하는 'OR' 로직으로 변경
+        if required:
+            passed_at_least_one = False
+            errors = []
 
-        # 파이프(|)로 시작하는 라인이 2개 이상인지 단순 카운트로 테이블 여부 판단
-        if "MARKDOWN_TABLE" in required:
-            table_rows = [line for line in response.split('\n') if line.strip().startswith('|')]
-            if len(table_rows) < 2:
-                return self._create_format_span(response, rule, policy_id, "Response missing valid MARKDOWN_TABLE structure.")
+            if "JSON" in required:
+                try:
+                    json.loads(response)
+                    passed_at_least_one = True
+                except json.JSONDecodeError:
+                    errors.append("Not a valid JSON.")
 
-        # 2. 금지 포맷(Forbidden) 위반 검사
+            if "MARKDOWN_TABLE" in required and not passed_at_least_one:
+                table_rows = [line for line in response.split('\n') if line.strip().startswith('|')]
+                if len(table_rows) >= 2:
+                    passed_at_least_one = True
+                else:
+                    errors.append("Not a valid MARKDOWN_TABLE.")
+
+            # 모든 필수 형식 검사 후 하나도 통과 못 했을 때만 위반 처리
+            if not passed_at_least_one:
+                return self._create_format_span(response, rule, policy_id, f"Required format missing: {', '.join(errors)}")
+
+        # 금지 포맷 검사: 하나라도 걸리면 즉시 위반
         if "PLAIN_TEXT_WITH_MARKDOWN" in forbidden:
-            # 특수 기호가 포함되어 있다면 순수 텍스트가 아님
             if re.search(r"[*#`]", response):
-                return self._create_format_span(response, rule, policy_id, "Forbidden markdown characters found in PLAIN_TEXT mode.")
+                return self._create_format_span(response, rule, policy_id, "Forbidden markdown characters found.")
 
         return False, None, ""
 
     """포맷 위반 발생 시 Evidence Span 생성 유틸리티"""
     def _create_format_span(self, response: str, rule, policy_id: str, reason: str) -> Tuple[bool, Dict[str, Any], str]:
         span = {
-            "text": response[:120], # 전체 문장이 길 수 있으므로 도입부만 캡처
+            "text": response[:120],
             "start_char": 0,
             "end_char": min(len(response), 120),
             "source": "rule",
