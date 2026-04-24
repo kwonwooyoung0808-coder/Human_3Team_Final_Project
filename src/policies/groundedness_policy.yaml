@@ -1,17 +1,47 @@
 id: "GROUND_001"
 name: "groundedness_policy"
+version: "1.2.0"
 enabled: true
 type: "judge"
 severity: "medium"
+priority: 30
 
+# A-7 MEDIUM 해소: 중복을 방지하고 확장을 고려하여 명시적 트리거 필드로 변경
+# 옵션: "always" | "rule_triggered" | "never"
+judge_required: "always"
+
+preconditions:
+  requires_retrieved_context: true
+  # B-4 HIGH 해소: retrieved_context가 None이거나 빈 리스트([])일 때 모두 대응
+  no_context_behavior: "SKIP"
+  empty_context_behavior: "SKIP"
+
+# Groundedness는 Rule 엔진의 정규식/문자열 매칭을 거치지 않는 Judge 전용 정책임
 rules: []
 
 judge:
   enabled: true
+  score_field: "confidence"
   criteria: >
     답변이 제공된 retrieved_context에 의해 지지되는가?
     응답에서 핵심 주장을 추출하여 제공된 context와 일치하는지 판단한다.
+  output_contract:
+    required_fields:
+      - "supported"
+      - "confidence"
+      - "reason"
+
+severity_by_confidence:
+  high_when_confidence_gte: 0.85
 
 action:
-  type: "LOG"
-  message: "응답 내용이 제공된 context로부터 충분히 지지되지 않아 로그가 기록되었습니다."
+  default_type: "LOG"
+  # B-1 CRITICAL 해소: 팀 합의된 차단 임계값 (해당 임계값 도달 시 LOG에서 BLOCK으로 격상)
+  block_threshold: 0.85
+  block_message: "응답 내용이 제공된 context로부터 충분히 지지되지 않아 응답이 차단되었습니다."
+  log_message: "응답 내용이 제공된 context로부터 충분히 지지되지 않아 로그가 기록되었습니다."
+
+conflict_resolution:
+  block_overrides_log: true
+  use_policy_priority: true
+  fallback_message_policy: "highest_priority_block"
