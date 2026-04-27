@@ -1,107 +1,106 @@
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
-# B-1 해소: Rule 검증 실패 시 즉시 차단할지, Judge로 넘길지 결정하는 흐름 제어 필드
 class PolicyRule(BaseModel):
+    """개별 룰(Rule)의 조건을 정의하는 스키마"""
     condition: str
-
-    # [LOW 이슈 반영]: 문자열 오타 방지 및 타입 안정성 강화를 위해 Literal 적용
-    # Rule 검증 실패 시 즉시 차단할지, 아니면 Judge로 재검증할지 명확히 제한
+    # 위반 탐지 시 후속 행동.
+    # block_immediately: 즉시 차단 (고속 처리)
+    # judge_fallback: 위반은 탐지했으나 문맥 파악을 위해 Judge(LLM)에게 2차 판단 위임
     on_rule_failure: Optional[Literal["block_immediately", "judge_fallback"]] = None
-
     parameters: dict[str, Any] = Field(default_factory=dict)
 
-# B-4 해소: Groundedness 등 컨텍스트가 필요한 정책에서 데이터 부재 시의 동작 정의
+
 class PolicyPreconditions(BaseModel):
-    # [LOW 이슈 반영]: Groundedness 등 컨텍스트가 필요한 정책에서 데이터 부재 시의 동작 정의
+    """
+    특정 정책이 실행되기 위해 만족해야 하는 사전 조건 (예: RAG의 문서 검색 여부)
+    """
     requires_retrieved_context: bool = False
 
-    # 단순 문자열 오류 방지를 위해 처리 방식을 Literal로 엄격히 제한
-    # SKIP: 해당 정책 검사를 건너뜀 / WARN: 경고 로그를 남기고 다음 단계로 진행
-    no_context_behavior: Optional[Literal["SKIP", "WARN"]] = None    # 데이터가 None일 때
-    empty_context_behavior: Optional[Literal["SKIP", "WARN"]] = None # 데이터가 빈 리스트([])일 때
+    # 컨텍스트가 없을 때의 동작 정의 (RAG 시스템 안정성 보장용)
+    # SKIP: 평가를 건너뜀 (위반 아님)
+    # WARN: 평가를 건너뛰지만, 로그에 경고성으로 기록 (triggered=True)
+    # FAIL: 컨텍스트 부재 자체를 시스템 오류나 우회 시도로 간주하여 즉시 차단
+    no_context_behavior: Literal["SKIP", "WARN", "FAIL"] = "SKIP"
+
 
 class PolicyJudgeConfig(BaseModel):
+    """LLM 기반 Judge 엔진 구동을 위한 설정"""
     enabled: bool = False
     score_field: Optional[str] = None
     criteria: Optional[str] = None
     output_contract: Optional[dict[str, Any]] = None
 
-class PolicyAction(BaseModel):
-    # [MEDIUM 이슈 반영]: 기존 시스템과의 하위 호환성(Backward Compatibility) 유지 및
-    # 특정 조건이 없는 일반적인 Rule 정책에서 범용적으로 사용할 응답 메시지 필드
-    message: Optional[str] = None
 
-    # Rule 기반 정책의 Action 필드
-    # 위반 시 수행할 액션 타입(차단 또는 기록)과 정책 위반 시 반환할 대체 응답 정의
+class PolicyAction(BaseModel):
+    """위반 시 실행할 액션 정의"""
+    message: Optional[str] = None
     type: Optional[Literal["BLOCK", "LOG"]] = None
     fallback_response: Optional[str] = None
-
-    # Judge 기반 정책의 Action 필드 (예: Groundedness Policy)
-    # 신뢰도 점수가 임계값(threshold)을 넘었을 때와 그렇지 않았을 때의 메시지를 개별 관리
     default_type: Optional[Literal["BLOCK", "LOG"]] = None
     block_threshold: Optional[float] = None
     block_message: Optional[str] = None
     log_message: Optional[str] = None
 
-# B-5 해소: 복수 정책 위반 시 우선순위 및 메시지 선택 전략 정의
+
 class ConflictResolution(BaseModel):
+    """다중 정책 위반 시 충돌 해결 전략 (추후 Interceptor에서 라우팅에 사용)"""
     block_overrides_log: bool = True
     use_policy_priority: bool = True
     fallback_message_policy: str = "highest_priority_block"
 
-# [MEDIUM 이슈 반영]: 점수 기반으로 심각도를 가변적으로 조정하기 위한 필드 확장
+
 class SeverityByConfidence(BaseModel):
     high_when_confidence_gte: float
     medium_when_confidence_gte: Optional[float] = None
     low_when_confidence_gte: Optional[float] = None
 
+
 class Policy(BaseModel):
+    """
+    단일 YAML 정책 파일 전체를 매핑하는 최상위 모델
+    """
     id: str
     name: str
     version: Optional[str] = None
     enabled: bool = True
+
+    # [아키텍처 중요] 정책의 평가 방식을 결정하는 타입
+    # rule: 정규식/문자열 기반의 초고속 판단 (예: PII 마스킹, 즉시 차단 금지어)
+    # judge: LLM을 이용한 의미론적 판단 (예: Groundedness)
+    # hybrid: Rule로 1차 필터링 후 애매한 경우에만 Judge로 넘기는 방식 (비용 최적화)
     type: Literal["rule", "judge", "hybrid"]
     severity: Literal["low", "medium", "high"] = "medium"
     priority: int = 100
 
-    # [MEDIUM 이슈 반영]: 정책 차단 여부를 결정하는 최소 심각도 임계값
-    # 'high'로 설정 시, 위반 결과의 severity가 high일 때만 차단 로직이 활성화됨
-    # 타입 오타 방지를 위해 문자열에서 Literal로 엄격하게 제한
-    severity_threshold: Optional[Literal["low", "medium", "high"]] = None
-
-    # A-7 해소: 불필요한 중복 제거 및 파이프라인 트리거 조건을 명시적 상수로 관리
-    # always: 무조건 Judge 실행, rule_triggered: Rule 위반 시 실행, never: Rule만 실행
+    # Judge 실행 시점 제어
     judge_required: Literal["always", "rule_triggered", "never"]
 
     severity_threshold: Optional[str] = None
 
-    # B-4 해소: 전처리 조건 정의 (데이터 유무에 따른 정책 실행 여부 결정)
     preconditions: Optional[PolicyPreconditions] = None
-
     rules: list[PolicyRule] = Field(default_factory=list)
     judge: PolicyJudgeConfig = Field(default_factory=PolicyJudgeConfig)
-
-    # B-1, B-5 대응: 통합된 액션 관리 객체
     action: PolicyAction
-
-    # 신뢰도 점수에 따른 심각도 매핑 로직
     severity_by_confidence: Optional[SeverityByConfidence] = None
-
-    # 복수 정책 위반 처리 전략
     conflict_resolution: Optional[ConflictResolution] = None
+
 
 class PolicyEvaluationResult(BaseModel):
     """
-    Policy Engine의 최종 출력 규격
-    모든 정책 검사 결과는 이 스키마로 표준화되어 Violation Builder로 전달됩니다.
+    Policy Engine의 최종 출력 규격.
+    이 객체가 Violation Builder와 Action Engine으로 전달되어 최종 응답을 결정합니다.
     """
     policy_id: str
     policy_name: str
-    triggered: bool = False
-    judge_required: bool = False
+    triggered: bool = False # 위반 여부 (True면 위반 또는 WARN 상태)
+    judge_required: bool = False # 다음 파이프라인에서 Judge 엔진을 호출해야 하는지 여부
     judge_result: dict[str, Any] | None = None
     recommended_action: Literal["BLOCK", "LOG"]
     severity: Literal["low", "medium", "high"]
+
+    # 어떤 문장/단어 때문에 위반되었는지 하이라이팅하기 위한 증거 데이터
     evidence_spans: list[dict[str, Any]] = Field(default_factory=list)
     reason: str
+    # Preconditions으로 인해 평가가 스킵된 경우 로그에서 구분하기 위한 명시적 사유 필드
+    skip_reason: Optional[str] = None
