@@ -10,8 +10,7 @@ from src.schemas.audit import AuditLogCreate
 from src.schemas.workflow import EvaluateRequest, EvaluateResponse
 from src.services.audit_logger import AuditLogger
 from src.services.trace_logger import TraceLogger
-from src.workflows.agent_workflow import generate_workflow_state
-from src.workflows.interceptors.interceptor import evaluate_final_response
+from src.workflows.agent_workflow import execute_workflow
 
 router = APIRouter(prefix="/api/v1", tags=["evaluate"])
 
@@ -22,12 +21,19 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
     trace_logger = TraceLogger(db)
     trace_logger.log_node(request.run_id, settings.workflow_name, "input", "api")
 
-    state = generate_workflow_state(request)
+    state = execute_workflow(request)
     trace_logger.log_node(request.run_id, settings.workflow_name, "generator", "fake_llm")
-
-    violations, action = evaluate_final_response(state)
-    trace_logger.log_node(request.run_id, settings.workflow_name, "governance_interceptor", "policy")
+    trace_logger.log_node(request.run_id, settings.workflow_name, "policy_evaluator", "policy")
+    if state.judge_results:
+        trace_logger.log_node(request.run_id, settings.workflow_name, "judge_engine", "judge")
+    if state.violations:
+        trace_logger.log_node(request.run_id, settings.workflow_name, "violation_builder", "violation")
     trace_logger.log_node(request.run_id, settings.workflow_name, "action_engine", "action")
+
+    violations = state.violations
+    action = state.action
+    if action is None:
+        raise RuntimeError("Workflow completed without an action result.")
 
     db.merge(
         WorkflowRunModel(
@@ -92,4 +98,3 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
         final_response=action.delivered_response,
         violations=violations,
     )
-
