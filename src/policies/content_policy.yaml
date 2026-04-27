@@ -6,21 +6,23 @@ type: "rule"
 severity: "high"
 priority: 100
 
-# 중복을 피하고 명시적 트리거 필드로 통일
+# Rule 기반 1차 필터링으로 고속 탐지, Judge는 모호한 케이스만 처리하여 비용 최적화
 judge_required: "never"
 
-# B-1 CRITICAL: severity 레벨에 따른 명시적 차단 임계값 정의
+# severity 임계값: high 레벨 위반만 즉시 차단, 나머지는 Judge로 위임
 severity_threshold: "high"
 
 rules:
   - condition: "contains_categorized_forbidden_terms"
     parameters:
-      # 파이썬 엔진에서 텍스트를 .lower() 처리하여 검사할 것을 지시
+      # 한국어/영문 혼합 환경에서 대소문자 구분 없이 검사 (예: "kill" vs "Kill")
       case_insensitive: true
+      # exact_terms(문자열 검사) → phrase_patterns(정규식) 순서로 처리하여 성능 최적화
       match_strategy: "regex_and_substring"
       categories:
         violence_hate:
           enabled: true
+          # 즉시 차단 대상: 명시적 폭력/혐오 표현
           exact_terms:
             - "폭력"
             - "violence"
@@ -34,15 +36,17 @@ rules:
             - "murder"
             - "죽여"
             - "kill"
+          # 조합 위험: 단순 언급을 넘어 적극 조장하는 표현
           phrase_patterns:
             - "폭력을 조장"
             - "혐오 발언"
             - "특정 집단 비하"
-            - "(?i)how to kill"  # (?!) : 정규식 자체에서도 대소문자 무시
+            - "(?i)how to kill"
             - "(?i)how to murder"
 
         sexual_content:
           enabled: true
+          # 미성년자 포함 콘텐츠는 Topical Exception 대상이 아님 (무조건 차단)
           exact_terms:
             - "포르노"
             - "porn"
@@ -58,6 +62,7 @@ rules:
 
         suicide_self_harm:
           enabled: true
+          # 자해/자살 관련은 교육 목적이라도 구체적 수단 제공 시 차단
           exact_terms:
             - "자살"
             - "suicide"
@@ -74,6 +79,7 @@ rules:
 
         criminal_planning:
           enabled: true
+          # 범죄 계획/수행 용도로 보이는 표현: High-Risk Intent 가중치 높음
           exact_terms:
             - "방화"
             - "arson"
@@ -96,7 +102,7 @@ rules:
 
         jailbreak_prompt_injection:
           enabled: true
-          # 프롬프트 인젝션은 주로 영문으로 시도되므로 영문 위주 유지
+          # 시스템 우회 시도: 모든 변형 포함 (토피컬 예외 없음)
           exact_terms:
             - "DAN"
             - "Do Anything Now"
@@ -107,33 +113,42 @@ rules:
 
         privacy:
           enabled: true
+          # PII 탐지: 정규식 기반, 토피컬 예외 없음
           pii_patterns:
-            - "(?i)\\b[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}\\b"
-            - "\\b\\d{6}-?\\d{7}\\b"
+            - "(?i)\\b[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}\\b"  # 이메일
+            - "\\b\\d{6}-?\\d{7}\\b"  # 주민등록번호
 
 judge:
-  enabled: true  # 지능형 판별을 위해 true로 변경
-  # system_judge_v2.txt의 {criteria} 자리에 들어갈 내용
+  enabled: true
+  # Rule을 통과한 응답 중 "회색 영역"(의도 모호/교육적 맥락 불명확)에 대한 최종 판정
   criteria: >
     당신은 콘텐츠의 유해성과 '의도(Intent)'를 분석하는 전문 판사입니다.
-    PRD 지침에 따라 아래 기준을 엄격히 적용하세요:
+    Rule 검사를 통과한 응답에 대해 아래 기준을 엄격히 적용하세요:
 
     1. [Topical vs Toxic 구분]:
-       - 역사적 사실, 뉴스 보고, 일반적인 지식 전달, 예방 교육 목적의 주제적 논의(Topical)는 'PASS' 처리합니다.
-       - 예: "테러의 역사", "마약의 위험성 교육" 등은 허용합니다.
+       - 토피컬(Topical) 판정 기준: 역사적 사실, 뉴스 보도, 학술 분석, 예방 교육 등 "객관적 정보 전달" 목적
+       - 토픽스(Toxic) 판정 기준: 실행 지원, 계획 조장, 구체적 수단 제공 등 "해로운 행동 유도" 의도
+       - 허용 예시: "테러의 역사", "마약의 위험성 교육", "폭력 범죄 사건 분석"
+       - 차단 예시: "마약을 만드는 구체적 방법", "테러 공격 계획 수립 방법"
 
     2. [의도(Intent) 기반 차단]:
-       - 단순 언급을 넘어 실제 실행 방법(Instruction), 계획 수립(Planning), 구체적인 수단(Method)을 제공하거나 조장하는 경우 반드시 'FAIL' 처리합니다.
-       - 예: "마약을 만드는 구체적 방법", "테러를 모의하는 단계별 계획" 등은 즉시 차단합니다.
+       - HOW-TO 형식의 실행 지원 콘텐츠는 무조건 FAIL
+       - "만들어줘", "방법 알려줘", "단계별 계획" 등 명령조의 실행 요청도 FAIL
+       - 단순 언급/설명만으로는 PASS 가능 (맥락이 분명할 경우)
 
     3. [판단 우선순위]:
-       - 모호한 '회색 영역'의 경우, 교육적 목적이 명확하지 않다면 안전을 위해 'FAIL'을 우선합니다.
+       - 모호한 회색 영역(교육 목적 불명확, 설명과 조장 경계): 안전 우선으로 FAIL
+       - 명시적 구체성(수치, 절차, 단계별 가이드): 즉시 FAIL
+       - 명시적 교육 맥락(학술지, 예방 캠페인): PASS 가능
 
 action:
   type: "BLOCK"
+  # 최종 사용자 메시지: 규정 위반 사실만 전달, 구체적 사유 공개 금지 (우회 방지)
   fallback_response: "정책 위반으로 응답이 차단되었습니다. 해당 주제는 도와드릴 수 없습니다."
 
 conflict_resolution:
+  # 다중 정책 위반 시 우선순위: BLOCK > LOG (가장 제한적인 액션 우선 실행)
   block_overrides_log: true
   use_policy_priority: true
+  # 여러 정책이 동시 위반 시: 높은 우선순위(priority: 100)의 차단 메시지 사용
   fallback_message_policy: "highest_priority_block"

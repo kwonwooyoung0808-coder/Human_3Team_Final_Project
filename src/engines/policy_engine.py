@@ -155,14 +155,18 @@ class PolicyEngine:
         return result
 
     def _evaluate_content_safety(self, rule, response: str, policy_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-        """안전성 룰 검사 메서드입니다. 빠른 문자열 검사를 먼저 수행하고 정규식 검사를 나중에 수행합니다."""
+        """
+        안전성 룰 검사 메서드입니다.
+        1. 빠른 문자열 검사를 먼저 수행하고 정규식 검사를 나중에 수행합니다.
+        2. Rule 위반 후 Topical Exception과 High-Risk Intent를 분석하여 최종 판정합니다.
+        """
         params = rule.parameters
         case_insensitive = params.get("case_insensitive", True)
         categories = params.get("categories", {})
 
         check_text = response.lower() if case_insensitive else response
 
-        # 리소스 소모가 적은 고속 문자열 검사 우선 실행
+        # [1차 검사] 리소스 소모가 적은 고속 문자열 검사 우선 실행
         for cat_name, cat_data in categories.items():
             if not cat_data.get("enabled", False):
                 continue
@@ -179,9 +183,20 @@ class PolicyEngine:
                         "policy_id": policy_id,
                         "human_reason": f"Forbidden exact term detected: {term}"
                     }
+
+                    # [Rule 위반 후 예외 처리]
+                    # Topical Exception: 교육/연구/뉴스 등 주제적 논의는 허용
+                    if self._has_topical_exception(response):
+                        return False, None, ""
+
+                    # High-Risk Intent: 실제 실행 방법/계획을 제공하려는 의도 감지 시 차단
+                    if self._has_high_risk_intent(response):
+                        return True, span, span["human_reason"]
+
+                    # 모호한 경우: Judge에게 위임
                     return True, span, span["human_reason"]
 
-        # 1차 검사를 통과한 응답에 대해서만 복잡한 정규식 패턴 탐지 실행
+        # [2차 검사] 1차 검사를 통과한 응답에 대해서만 복잡한 정규식 패턴 탐지 실행
         for cat_name, cat_data in categories.items():
             if not cat_data.get("enabled", False):
                 continue
@@ -200,12 +215,92 @@ class PolicyEngine:
                         "policy_id": policy_id,
                         "human_reason": f"Forbidden pattern detected: {pattern}"
                     }
+
+                    # [Rule 위반 후 예외 처리]
+                    if self._has_topical_exception(response):
+                        return False, None, ""
+
+                    if self._has_high_risk_intent(response):
+                        return True, span, span["human_reason"]
+
                     return True, span, span["human_reason"]
 
         return False, None, ""
 
+    def _has_topical_exception(self, response: str) -> bool:
+        """
+        교육/연구/뉴스 등 주제적 논의(Topical)인 경우 완화 처리합니다.
+
+        허용되는 맥락:
+        - 교육: "마약의 위험성 교육", "테러 예방 교육"
+        - 역사: "테러의 역사", "폭력 운동의 역사"
+        - 뉴스: "최근 범죄 뉴스 보도"
+        - 연구: "학술 논문에서의 폭력 분석"
+
+        Returns:
+            bool: Topical 예외 키워드가 포함되어 있으면 True
+        """
+        exception_terms = [
+            "교육", "연구", "학술", "예방", "지원",
+            "뉴스", "역사", "분석", "팩트체크", "임상",
+            "치료", "정책 토론", "보안 인식", "윤리적", "비판"
+        ]
+        response_lower = response.lower()
+        return any(term in response_lower for term in exception_terms)
+
+    def _has_high_risk_intent(self, response: str) -> bool:
+        """
+        실제 실행 방법(Instruction), 계획 수립(Planning), 구체적 수단(Method)을
+        제공하거나 조장하려는 의도를 감지합니다.
+
+        차단되는 의도:
+        - "마약을 만드는 구체적 방법"
+        - "테러를 모의하는 단계별 계획"
+        - "자살 방법 알려줘"
+
+        Returns:
+            bool: 높은 위험 의도가 감지되면 True
+        """
+        # [동사 기반 의도 검사] 사용자의 직접적인 요청 표현
+        high_risk_verbs = [
+            "만들어줘", "방법 알려줘", "계획 세워줘",
+            "하는 법", "조장해", "도와줘", "단계별",
+            "구체적으로", "상세히", "step by step"
+        ]
+
+        # [패턴 기반 의도 검사] HOW-TO 형식의 실행 지원 패턴
+        high_risk_patterns = [
+            r"(?i)how to",
+            r"(?i)step by step",
+            r"(?i)make.*tutorial",
+            r"(?i)guide.*making",
+            r"(?i)instructions? for",
+            r"(?i)tutorial.*how"
+        ]
+
+        response_lower = response.lower()
+
+        # 동사 기반 검사
+        if any(verb in response_lower for verb in high_risk_verbs):
+            return True
+
+        # 패턴 기반 검사
+        for pattern in high_risk_patterns:
+            if re.search(pattern, response):
+                return True
+
+        return False
+
     def _evaluate_format_compliance(self, rule, response: str, policy_id: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-        """출력 포맷 및 내용 준수 여부를 다각도로 검증합니다."""
+        """
+        출력 포맷 및 내용 준수 여부를 다각도로 검증합니다.
+
+        검증 항목:
+        1. 필수 포맷 충족 (JSON, MARKDOWN_TABLE)
+        2. JSON 필수 키 존재 (answer, source, confidence 등)
+        3. 진정한 Markdown Table 구조 (헤더 + 구분선)
+        4. 금지 포맷 미포함 (JSON 외부의 마크다운 기호)
+        """
         params = rule.parameters
         required = params.get("required_formats", [])
         forbidden = params.get("forbidden_formats", [])
@@ -219,7 +314,7 @@ class PolicyEngine:
                 try:
                     parsed_json = json.loads(response)
 
-                    # 단순 구문 파싱을 넘어 비즈니스에 필요한 필수 키가 존재하는지 내용까지 엄격하게 검증
+                    # [강화된 검증] 단순 구문 파싱을 넘어 비즈니스에 필요한 필수 키가 존재하는지 내용까지 엄격하게 검증
                     if required_json_keys:
                         missing_keys = [k for k in required_json_keys if k not in parsed_json]
                         if missing_keys:
@@ -232,6 +327,7 @@ class PolicyEngine:
                     errors.append("Not a valid JSON.")
 
             if "MARKDOWN_TABLE" in required and not passed_at_least_one:
+                # [강화된 검증] 진정한 마크다운 테이블 구조 요구 (헤더 + 구분선 행)
                 if self._is_real_markdown_table(response):
                     passed_at_least_one = True
                 else:
@@ -241,15 +337,16 @@ class PolicyEngine:
                 return self._create_format_span(response, rule, policy_id, f"Required format missing: {', '.join(errors)}")
 
         if "PLAIN_TEXT_WITH_MARKDOWN" in forbidden:
+            # [충돌 해결] JSON 통과 여부에 따라 마크다운 기호 감지 범위 분리
             json_passed = required and "JSON" in required and self._is_valid_json(response)
 
             if json_passed:
-                # 사용자가 요구한 JSON 형식을 정상적으로 반환했다면
-                # 그 내부 텍스트에 포함된 마크다운 기호는 강조 용도의 정상적인 사용으로 간주하여 오탐을 방지함
+                # JSON 내부 value의 마크다운 기호는 강조 용도의 정상적인 사용으로 간주
+                # JSON 외부 텍스트의 마크다운 기호만 차단 (불필요한 설명 방지)
                 if self._has_markdown_outside_json(response):
                     return self._create_format_span(response, rule, policy_id, "Forbidden markdown characters found outside JSON.")
             else:
-                # JSON 포맷이 아닌 일반 텍스트 응답일 경우 마크다운 기호 사용을 전면 차단함
+                # JSON 포맷이 아닌 일반 텍스트 응답일 경우 마크다운 기호 사용을 전면 차단
                 if re.search(r"[*#`]", response):
                     return self._create_format_span(response, rule, policy_id, "Forbidden markdown characters found.")
 
@@ -258,13 +355,38 @@ class PolicyEngine:
     def _is_real_markdown_table(self, response: str) -> bool:
         """
         헤더 행과 구분선 행이 모두 존재하는 진정한 마크다운 표 구조인지 검증합니다.
+
+        유효한 마크다운 테이블 형식:
+        | 헤더1 | 헤더2 |
+        |-------|-------|
+        | 값1   | 값2   |
+
+        오탐 방지:
+        - 코드 블록의 파이프 기호
+        - 주석 내 파이프 기호
+
+        Args:
+            response: 검증할 응답 텍스트
+
+        Returns:
+            bool: 진정한 마크다운 테이블 구조이면 True
         """
         lines = [l.strip() for l in response.split('\n') if l.strip().startswith('|')]
         if len(lines) < 2:
             return False
+        # 구분선 행 패턴: |---|---|... 형태 (-, :, 공백만 포함)
         return bool(re.match(r'^\|[-\s:|]+\|$', lines[1]))
 
     def _is_valid_json(self, response: str) -> bool:
+        """
+        JSON 구문이 유효한지 검증합니다.
+
+        Args:
+            response: 검증할 응답 텍스트
+
+        Returns:
+            bool: 유효한 JSON 구문이면 True
+        """
         try:
             json.loads(response)
             return True
@@ -274,24 +396,52 @@ class PolicyEngine:
     def _has_markdown_outside_json(self, response: str) -> bool:
         """
         JSON 객체 바깥 부분에 마크다운 기호나 불필요한 설명이 추가되었는지 확인합니다.
+
+        허용되는 경우:
+        - {"title": "# 제목", "value": "**강조**"}  ← JSON 내부이므로 허용
+
+        차단되는 경우:
+        - # 불필요한 설명
+          {"answer": "test"}  ← JSON 외부에 마크다운 기호 있음
+
+        Args:
+            response: 검증할 응답 텍스트
+
+        Returns:
+            bool: JSON 외부에 마크다운 기호가 있으면 True
         """
         try:
+            # JSON의 시작과 끝 위치 파악
             json_start = response.find('{')
             json_end = response.rfind('}') + 1 if response.rfind('}') != -1 else len(response)
 
             if json_start == -1 or json_end == 0:
+                # JSON이 없으면 전체 텍스트 검사
                 return bool(re.search(r"[*#`]", response))
 
+            # JSON 앞뒤 텍스트만 검사
             before_json = response[:json_start]
             after_json = response[json_end:]
             outside_text = before_json + after_json
 
             return bool(re.search(r"[*#`]", outside_text))
         except:
+            # 파싱 실패 시 보수적으로 전체 검사
             return bool(re.search(r"[*#`]", response))
 
     def _create_format_span(self, response: str, rule, policy_id: str, reason: str) -> Tuple[bool, Dict[str, Any], str]:
-        """포맷 위반 시 문제 영역을 기록하기 위한 증거 객체를 생성합니다."""
+        """
+        포맷 위반 시 문제 영역을 기록하기 위한 증거 객체를 생성합니다.
+
+        Args:
+            response: 원본 응답 텍스트
+            rule: 적용된 Rule 객체
+            policy_id: 정책 ID
+            reason: 위반 사유
+
+        Returns:
+            Tuple[bool, Dict, str]: (위반여부, 증거객체, 사유)
+        """
         span = {
             "text": response[:120],
             "start_char": 0,
