@@ -10,6 +10,7 @@ class PolicyRule(BaseModel):
     on_rule_failure: Optional[Literal["block_immediately", "judge_fallback"]] = None
     parameters: dict[str, Any] = Field(default_factory=dict)
 
+    required_json_keys: Optional[list[str]] = None  # JSON 검증용
 
 class PolicyPreconditions(BaseModel):
     """
