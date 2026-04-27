@@ -23,27 +23,22 @@ rules: []
 judge:
   enabled: true
   score_field: "confidence"
+  # system_judge_v2.txt의 {criteria} 자리에 들어갈 내용
+  criteria: |
+    당신은 답변의 '사실 근거(Groundedness)'를 검증하는 판사입니다.
+    PRD에 명시된 Chain-of-Thought(단계별 추론) 방식을 적용하여 평가하세요.
 
-  # [핵심] LLM에게 전달될 채점 가이드라인 (Prompt Injection 방지 및 일관성 확보용)
-  # 유해성 탐지가 아닌 '문서 지지율(Groundedness)' 판단에 맞게 루브릭이 커스텀 됨.
-  criteria: >
-    당신은 응답이 제공된 retrieved_context에 얼마나 잘 grounding(근거 기반)되어 있는지 판단하는 엄격한 평가자입니다.
+    [평가 단계]
+    1. 분석: Assistant Response에서 사실 관계를 주장하는 핵심 문장(Claim)들을 모두 추출합니다.
+    2. 대조: 각 문장을 Retrieved Context의 내용과 하나씩 대조합니다.
+    3. 판정:
+       - 모든 문장이 Context에 명시되어 있거나 직접적으로 유추 가능하면 'PASS'.
+       - Context에 없는 숫자를 지어내거나(Hallucination), 정면으로 반박되는 내용이 하나라도 있다면 'FAIL'.
 
-    [필수 적용: Confidence Scoring Guide]
-    - 1.0 (Certain): 응답의 모든 핵심 주장이 retrieved_context에 명시적으로 존재하며, 왜곡·추가·과장 없이 정확히 일치함.
-    - 0.8~0.9 (Probable): 응답의 주요 내용이 context에 강하게 지지되지만, 약간의 자연스러운 추론이나 재구성이 포함됨.
-    - 0.5~0.7 (Ambiguous): 일부 주장은 일치하나 중요한 부분에서 해석 차이, 누락, 또는 가벼운 과장이 있음.
-    - 0.1~0.4 (Unlikely): 응답에 context에 없는 새로운 사실이나 주장이 상당 부분 포함됨.
-    - 0.0 (Hallucination): 응답이 context와 거의 또는 전혀 관련이 없거나 명백히 모순됨.
-
-    판단 시 반드시 위 루브릭을 엄격히 따르고, confidence 점수를 0.0~1.0 사이의 float으로 출력하세요.
-    "supported" 필드는 전체 응답이 충분히 grounded되었다고 판단되는 경우에만 true로 하세요.
-
-  output_contract:
-    required_fields:
-      - "supported"     # boolean
-      - "confidence"    # float (0.0 ~ 1.0)
-      - "reason"        # string: 구체적이고 객관적인 판단 근거
+    [Scoring Guide]
+    - 1.0: 완벽한 일치 (추가/과장 없음)
+    - 0.5: 일부 근거는 있으나 중요한 수치나 고유명사 오류가 있음
+    - 0.0: 완전한 허위 사실 또는 문맥과 무관함
 
 severity_by_confidence:
   # 신뢰도(Confidence) 점수가 0.85 이상일 경우에만 Action 발동을 위한 Threshold 트리거
