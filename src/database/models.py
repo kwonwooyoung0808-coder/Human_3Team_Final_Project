@@ -1,9 +1,15 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship # relationship 추가
 
 from src.database.connection import Base
+
+# 🇰🇷 한국 시간대(UTC+9) 정의 추가
+KST = timezone(timedelta(hours=9))
+
+def get_current_kst():
+    return datetime.now(KST)
 
 
 class WorkflowRunModel(Base):
@@ -17,9 +23,9 @@ class WorkflowRunModel(Base):
     has_violation: Mapped[bool] = mapped_column(Boolean, default=False)
     workflow_name: Mapped[str] = mapped_column(String(120), default="governance_workflow")
     context_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
 
-    # [추가] 자식 테이블들과의 1:N 관계 설정
+    #자식 테이블들과의 1:N 관계 설정
     violations: Mapped[list["ViolationModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     audit_logs: Mapped[list["AuditLogModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     traces: Mapped[list["ExecutionTraceModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
@@ -30,7 +36,7 @@ class ViolationModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     violation_id: Mapped[str] = mapped_column(String(80), index=True)
-    # [수정] ForeignKey("workflow_runs.run_id") 추가
+    #ForeignKey("workflow_runs.run_id") 추가
     run_id: Mapped[str] = mapped_column(String(80), ForeignKey("workflow_runs.run_id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), index=True)
     policy_name: Mapped[str] = mapped_column(String(120))
@@ -40,9 +46,9 @@ class ViolationModel(Base):
     recommended_action: Mapped[str] = mapped_column(String(20))
     judge_verdict: Mapped[str | None] = mapped_column(String(20), nullable=True)
     judge_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
 
-    # [추가] 부모(Run) 및 자식(EvidenceSpan)과의 관계 설정
+    #부모(Run) 및 자식(EvidenceSpan)과의 관계 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="violations")
     evidence_spans: Mapped[list["EvidenceSpanModel"]] = relationship(back_populates="violation", cascade="all, delete-orphan")
 
@@ -62,7 +68,7 @@ class EvidenceSpanModel(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     human_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # [추가] 부모(Violation) 역참조 설정
+    #부모(Violation) 역참조 설정
     violation: Mapped["ViolationModel"] = relationship(back_populates="evidence_spans")
 
 
@@ -77,9 +83,9 @@ class AuditLogModel(Base):
     entity_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     reason: Mapped[str] = mapped_column(Text)
     context_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
 
-    # [추가] 부모(Run) 역참조 설정
+    #부모(Run) 역참조 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="audit_logs")
 
 
@@ -94,7 +100,7 @@ class ExecutionTraceModel(Base):
     node_type: Mapped[str] = mapped_column(String(80))
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(40), default="completed")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
 
-    # [추가] 부모(Run) 역참조 설정
+    #부모(Run) 역참조 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="traces")

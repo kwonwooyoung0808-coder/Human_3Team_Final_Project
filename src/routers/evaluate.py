@@ -74,15 +74,13 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             )
     db.commit()
 
+    # ✅ 수정 
     AuditLogger(db).log(
-        AuditLogCreate(
-            run_id=request.run_id,
-            event_type="policy_evaluation",
-            entity_type="run",
-            entity_id=request.run_id,
-            reason="Violation detected." if violations else "No violation detected.",
-            context_json=request.context,
-        )
+        run_id=request.run_id,
+        event_type="policy_evaluation",
+        entity_type="run",
+        reason="Violation detected." if violations else "No violation detected.",
+        context=request.context  #여기를 context_json 에서 context 로 변경했습니다!
     )
 
     return EvaluateResponse(
