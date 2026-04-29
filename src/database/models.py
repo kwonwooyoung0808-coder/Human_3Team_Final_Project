@@ -2,8 +2,10 @@ from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship # relationship 추가
-
+from sqlalchemy import JSON # PostgreSQL의 JSONB 대응
 from src.database.connection import Base
+import enum
+from sqlalchemy import Enum as SQLEnum
 # 🇰🇷 한국 시간대(UTC+9) 정의 추가
 KST = timezone(timedelta(hours=9))
 
@@ -66,7 +68,7 @@ class EvidenceSpanModel(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     human_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # [추가] 부모(Violation) 역참조 설정
+    #부모(Violation) 역참조 설정
     violation: Mapped["ViolationModel"] = relationship(back_populates="evidence_spans")
 
 
@@ -74,16 +76,20 @@ class AuditLogModel(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # [수정] ForeignKey("workflow_runs.run_id") 추가
     run_id: Mapped[str] = mapped_column(String(80), ForeignKey("workflow_runs.run_id"), index=True)
-    event_type: Mapped[str] = mapped_column(String(80))
-    entity_type: Mapped[str] = mapped_column(String(80))
-    entity_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    
+    # PRD 요구사항 반영: 질의/응답 구분 및 위험도 데이터 저장
+    event_type: Mapped[str] = mapped_column(String(80)) # 'query_audit' 또는 'response_audit'
+    input_text: Mapped[str | None] = mapped_column(Text, nullable=True) # 사용자 질의문 또는 AI 응답문
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0) # AI가 판정한 위험 점수
+    
+    # 핵심: AI가 판단한 상세 근거들을 JSON 형태로 통째로 저장 (JSONB 대응)
+    # SQLite에서는 텍스트로, PostgreSQL에서는 실제 JSONB로 작동합니다.
+    risk_reasons: Mapped[dict | None] = mapped_column(JSON, nullable=True) 
+    
     reason: Mapped[str] = mapped_column(Text)
-    context_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
-
-    # [추가] 부모(Run) 역참조 설정
+    #부모(Violation) 역참조 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="audit_logs")
 
 
@@ -102,3 +108,20 @@ class ExecutionTraceModel(Base):
 
     # [추가] 부모(Run) 역참조 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="traces")
+
+# --- [여기서부터 맨 아래에 추가] ---
+class ConversionStatus(str, enum.Enum):
+    SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+class PolicyConversionLogModel(Base):
+    __tablename__ = "policy_conversion_logs"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True) # UUID
+    policy_id: Mapped[str] = mapped_column(String(80), index=True) 
+    original_filename: Mapped[str] = mapped_column(Text)
+    parsed_rules_count: Mapped[int] = mapped_column(Integer, default=0)
+    conversion_status: Mapped[ConversionStatus] = mapped_column(SQLEnum(ConversionStatus))
+    warnings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
