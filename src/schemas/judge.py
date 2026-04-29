@@ -8,4 +8,6 @@ class JudgeResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
     evidence_text: str | None = None
+    severity: str | None = None
+    action: str | None = None
 

@@ -1,11 +1,8 @@
-from datetime import datetime, timezone, timedelta
-from typing import Any
-from pydantic import BaseModel, field_serializer
+from datetime import datetime
+from typing import Any, Literal
+from pydantic import BaseModel
 
-# 🇰🇷 한국 시간대 설정
-KST = timezone(timedelta(hours=9))
 
-# 1. 생성용 스키마 (PRD 새 필드에 맞게 수정)
 class AuditLogCreate(BaseModel):
     run_id: str
     event_type: str

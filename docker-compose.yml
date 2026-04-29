@@ -4,10 +4,26 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./governance.db
+      - DATABASE_URL=postgresql://safeagent_app:safeagent_password@postgres:5432/safeagent
       - POLICY_DIR=src/policies
       - PROMPT_DIR=src/prompts
     volumes:
       - .:/app
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - postgres
 
+  postgres:
+    image: postgres:16
+    container_name: safeagent-postgres
+    environment:
+      - POSTGRES_DB=safeagent
+      - POSTGRES_USER=safeagent_app
+      - POSTGRES_PASSWORD=safeagent_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
