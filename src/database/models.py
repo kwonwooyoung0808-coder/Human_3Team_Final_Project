@@ -1,26 +1,14 @@
-from datetime import date, datetime, timedelta, timezone
-
-<<<<<<< HEAD
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship # relationship 추가
-from sqlalchemy import JSON # PostgreSQL의 JSONB 대응
-from src.database.connection import Base
 import enum
-from sqlalchemy import Enum as SQLEnum
-# 🇰🇷 한국 시간대(UTC+9) 정의 추가
-=======
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from src.database.connection import Base
 
->>>>>>> deb5206f4fd1b0cf30125bfee4b6b6a105cd8121
+# 🇰🇷 한국 시간대(UTC+9)
 KST = timezone(timedelta(hours=9))
-
 
 def get_current_kst() -> datetime:
     return datetime.now(KST)
-
 
 class WorkflowRunModel(Base):
     __tablename__ = "workflow_runs"
@@ -35,10 +23,9 @@ class WorkflowRunModel(Base):
     context_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
 
+    # 옛날 audit_logs 관계는 삭제.
     violations: Mapped[list["ViolationModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
-    audit_logs: Mapped[list["AuditLogModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     traces: Mapped[list["ExecutionTraceModel"]] = relationship(back_populates="run", cascade="all, delete-orphan")
-
 
 class ViolationModel(Base):
     __tablename__ = "violations"
@@ -59,7 +46,6 @@ class ViolationModel(Base):
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="violations")
     evidence_spans: Mapped[list["EvidenceSpanModel"]] = relationship(back_populates="violation", cascade="all, delete-orphan")
 
-
 class EvidenceSpanModel(Base):
     __tablename__ = "evidence_spans"
 
@@ -74,39 +60,7 @@ class EvidenceSpanModel(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     human_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-<<<<<<< HEAD
-    #부모(Violation) 역참조 설정
-=======
->>>>>>> deb5206f4fd1b0cf30125bfee4b6b6a105cd8121
     violation: Mapped["ViolationModel"] = relationship(back_populates="evidence_spans")
-
-
-class AuditLogModel(Base):
-    __tablename__ = "audit_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(String(80), ForeignKey("workflow_runs.run_id"), index=True)
-    
-    # PRD 요구사항 반영: 질의/응답 구분 및 위험도 데이터 저장
-    event_type: Mapped[str] = mapped_column(String(80)) # 'query_audit' 또는 'response_audit'
-    input_text: Mapped[str | None] = mapped_column(Text, nullable=True) # 사용자 질의문 또는 AI 응답문
-    risk_score: Mapped[float] = mapped_column(Float, default=0.0) # AI가 판정한 위험 점수
-    
-    # 핵심: AI가 판단한 상세 근거들을 JSON 형태로 통째로 저장 (JSONB 대응)
-    # SQLite에서는 텍스트로, PostgreSQL에서는 실제 JSONB로 작동합니다.
-    risk_reasons: Mapped[dict | None] = mapped_column(JSON, nullable=True) 
-    
-    reason: Mapped[str] = mapped_column(Text)
-<<<<<<< HEAD
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
-    #부모(Violation) 역참조 설정
-=======
-    context_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
-
->>>>>>> deb5206f4fd1b0cf30125bfee4b6b6a105cd8121
-    run: Mapped["WorkflowRunModel"] = relationship(back_populates="audit_logs")
-
 
 class ExecutionTraceModel(Base):
     __tablename__ = "execution_traces"
@@ -120,18 +74,13 @@ class ExecutionTraceModel(Base):
     status: Mapped[str] = mapped_column(String(40), default="completed")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
 
-<<<<<<< HEAD
-    # [추가] 부모(Run) 역참조 설정
     run: Mapped["WorkflowRunModel"] = relationship(back_populates="traces")
 
-# --- [여기서부터 맨 아래에 추가] ---
+# 문법 오류 수정
 class ConversionStatus(str, enum.Enum):
     SUCCESS = "SUCCESS"
     PARTIAL = "PARTIAL"
     FAILED = "FAILED"
-=======
-    run: Mapped["WorkflowRunModel"] = relationship(back_populates="traces")
-
 
 class PolicyModel(Base):
     __tablename__ = "policies"
@@ -145,7 +94,6 @@ class PolicyModel(Base):
     original_docx_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
 
-
 class AgentModel(Base):
     __tablename__ = "agents"
 
@@ -157,7 +105,7 @@ class AgentModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
 
-
+# Audit 모델 QueryAuditLogModel, ResponseAuditLogModel, PolicyConversionLogModel 추가
 class QueryAuditLogModel(Base):
     __tablename__ = "query_audit_logs"
 
@@ -171,7 +119,6 @@ class QueryAuditLogModel(Base):
     risk_reasons: Mapped[list | dict] = mapped_column(JSON, default=list)
     action_taken: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
-
 
 class ResponseAuditLogModel(Base):
     __tablename__ = "response_audit_logs"
@@ -187,25 +134,13 @@ class ResponseAuditLogModel(Base):
     violations: Mapped[list | dict] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
 
->>>>>>> deb5206f4fd1b0cf30125bfee4b6b6a105cd8121
-
 class PolicyConversionLogModel(Base):
     __tablename__ = "policy_conversion_logs"
 
-<<<<<<< HEAD
-    id: Mapped[str] = mapped_column(String(80), primary_key=True) # UUID
+    id: Mapped[str] = mapped_column(String(80), primary_key=True) 
     policy_id: Mapped[str] = mapped_column(String(80), index=True) 
     original_filename: Mapped[str] = mapped_column(Text)
     parsed_rules_count: Mapped[int] = mapped_column(Integer, default=0)
     conversion_status: Mapped[ConversionStatus] = mapped_column(SQLEnum(ConversionStatus))
     warnings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=get_current_kst)
-=======
-    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
-    policy_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("policies.id"), nullable=True)
-    original_filename: Mapped[str] = mapped_column(String(255))
-    parsed_rules_count: Mapped[int] = mapped_column(Integer, default=0)
-    conversion_status: Mapped[str] = mapped_column(String(20))
-    warnings: Mapped[list | dict] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_current_kst)
->>>>>>> deb5206f4fd1b0cf30125bfee4b6b6a105cd8121

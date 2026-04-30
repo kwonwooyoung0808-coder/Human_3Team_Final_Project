@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from src.core.config import get_settings
 from src.database.connection import init_db
-from src.routers import audit, evaluate, runs, violations
+from src.routers import audit, runs, violations # evlauate는 삭제되었음.
 
 settings = get_settings()
 
@@ -24,7 +24,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-app.include_router(evaluate.router)
+# evlauate는 그러므로 router 삭제.
 app.include_router(runs.router)
 app.include_router(violations.router)
 app.include_router(audit.router)
