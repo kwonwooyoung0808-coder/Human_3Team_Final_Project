@@ -35,11 +35,6 @@ rules:
           exact_terms: ["방화", "arson", "납치", "kidnap", "사기", "fraud", "scam", "다크웹", "dark web", "마약", "drugs", "불법무기", "illegal weapons"]
           phrase_patterns: ["범죄 계획", "총기 제작", "폭발물 만드는 법", "(?i)how to make a bomb"]
 
-        jailbreak_prompt_injection:
-          enabled: true
-          exact_terms: ["DAN", "Do Anything Now"]
-          phrase_patterns: ["(?i)ignore\\s+previous", "(?i)act\\s+as\\s+.*without\\s+restrictions", "(?i)reveal\\s+your\\s+system\\s+prompt"]
-          
         corporate_risk:
           enabled: true
           exact_terms: ["합법입니다", "불법입니다", "영업비밀", "프로젝트 넥서스", "강력 매수"]
