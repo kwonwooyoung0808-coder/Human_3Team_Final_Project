@@ -16,3 +16,6 @@ venv/
 # DB
 *.sqlite
 governance.db
+
+# policy
+policymd/
