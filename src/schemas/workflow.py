@@ -29,7 +29,7 @@ class EvaluateRequest(BaseModel):
 class EvaluateResponse(BaseModel):
     run_id: str
     has_violation: bool
-    final_action: Literal["BLOCK", "LOG"]
+    final_action: Literal["BLOCK", "LOG", "PASS", "FLAGGED"]
     final_response: str
     violations: list[Violation] = Field(default_factory=list)
 

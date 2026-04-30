@@ -2,10 +2,14 @@ import os
 from functools import lru_cache
 
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 class Settings(BaseModel):
-    app_name: str = os.getenv("APP_NAME", "Policy-Aware Agent Governance Engine")
+    app_name: str = os.getenv("APP_NAME", "SafeAgent_Manager")
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://safeagent_app:safeagent_password@localhost:5432/safeagent"
     )

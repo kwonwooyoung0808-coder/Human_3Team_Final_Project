@@ -18,6 +18,21 @@ router = APIRouter(prefix="/api/v1", tags=["evaluate"])
 @router.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> EvaluateResponse:
     settings = get_settings()
+    db.merge(
+        WorkflowRunModel(
+            run_id=request.run_id,
+            input=request.input,
+            output=request.response or "",
+            final_status="running",
+            final_action="LOG",
+            has_violation=False,
+            workflow_name=settings.workflow_name,
+            context_json=json.dumps(request.context),
+            created_at=get_current_kst(),
+        )
+    )
+    db.commit()
+
     trace_logger = TraceLogger(db)
     trace_logger.log_node(request.run_id, settings.workflow_name, "input", "api")
 
