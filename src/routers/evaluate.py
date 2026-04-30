@@ -1,4 +1,5 @@
 import json
+import uuid # 추가: 임시 UUID 생성용
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -6,14 +7,14 @@ from sqlalchemy.orm import Session
 from src.core.config import get_settings
 from src.core.dependencies import get_db
 from src.database.models import EvidenceSpanModel, ViolationModel, WorkflowRunModel, get_current_kst
-from src.schemas.audit import AuditLogCreate
+# 수정: 옛날 AuditLogCreate 대신 ResponseAuditLogCreate 수입
+from src.schemas.audit import ResponseAuditLogCreate
 from src.schemas.workflow import EvaluateRequest, EvaluateResponse
 from src.services.audit_logger import AuditLogger
 from src.services.trace_logger import TraceLogger
 from src.workflows.agent_workflow import execute_workflow
 
 router = APIRouter(prefix="/api/v1", tags=["evaluate"])
-
 
 @router.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> EvaluateResponse:
@@ -60,8 +61,6 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             has_violation=bool(violations),
             workflow_name=settings.workflow_name,
             context_json=json.dumps(request.context),
-            # Reusing the same run_id should still reflect the latest execution time
-            # in GET /runs/{run_id} and /runs/{run_id}/trace summaries.
             created_at=get_current_kst(),
         )
     )
@@ -98,14 +97,18 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             )
     db.commit()
 
-    AuditLogger(db).log(
-        AuditLogCreate(
-            run_id=request.run_id,
-            event_type="policy_evaluation",
-            entity_type="run",
-            entity_id=request.run_id,
-            reason="Violation detected." if violations else "No violation detected.",
-            context_json=request.context,
+    # ✅ 수정: 모델에서 허용하는 빈 값(None)이나 진짜 들어온 값을 안전하게 사용!
+    
+    AuditLogger(db).log_response_audit(
+        ResponseAuditLogCreate(
+            id=str(uuid.uuid4()),
+            agent_id=request.context.get("agent_id", "default_agent_id"),
+            policy_id=request.context.get("policy_id", "default_policy_id"),
+            query=request.input,
+            response=action.delivered_response,
+            compliance_score=1.0 if violations else 0.0,
+            status="REJECTED" if violations else "APPROVED",
+            violations={"legacy_violation": "detected"} if violations else {}
         )
     )
 
