@@ -1,11 +1,12 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from src.core.config import get_settings
 from src.core.dependencies import get_db
-from src.database.models import EvidenceSpanModel, ViolationModel, WorkflowRunModel, get_current_kst
+from src.database.models import EvidenceSpanModel, ViolationModel, WorkflowRunModel
 from src.schemas.audit import AuditLogCreate
 from src.schemas.workflow import EvaluateRequest, EvaluateResponse
 from src.services.audit_logger import AuditLogger
@@ -28,7 +29,7 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             has_violation=False,
             workflow_name=settings.workflow_name,
             context_json=json.dumps(request.context),
-            created_at=get_current_kst(),
+            created_at=datetime.now(timezone.utc),
         )
     )
     db.commit()
@@ -62,7 +63,7 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             context_json=json.dumps(request.context),
             # Reusing the same run_id should still reflect the latest execution time
             # in GET /runs/{run_id} and /runs/{run_id}/trace summaries.
-            created_at=get_current_kst(),
+            created_at=datetime.now(timezone.utc),
         )
     )
     db.commit()
@@ -82,6 +83,7 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
                 judge_confidence=violation.judge_confidence,
             )
         )
+        db.flush()
         if violation.evidence_span:
             db.add(
                 EvidenceSpanModel(
