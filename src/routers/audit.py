@@ -1,10 +1,10 @@
 import json
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.core.dependencies import get_db
-from src.database.models import AuditLogModel
+from src.database.models import AuditLogModel, QueryAuditLogModel, ResponseAuditLogModel
 from src.schemas.audit import AuditLogResponse # 스키마 임포트
 
 router = APIRouter(prefix="/api/v1", tags=["audit"])
@@ -32,3 +32,51 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
             "created_at": row.created_at,
         })
     return result
+
+
+# ──────────────────────────────────────────────────────────────
+# PRD 9: GET /v1/audit/query/{audit_id} — Feature 1 감사 로그 조회
+# ──────────────────────────────────────────────────────────────
+query_audit_router = APIRouter(prefix="/v1/audit", tags=["audit"])
+
+
+@query_audit_router.get("/query/{audit_id}")
+def get_query_audit(audit_id: str, db: Session = Depends(get_db)) -> dict:
+    """Feature 1 응답의 audit_id로 질의 감사 로그 단건 조회."""
+    row = db.query(QueryAuditLogModel).filter(QueryAuditLogModel.id == audit_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"audit_id={audit_id} 없음")
+
+    return {
+        "audit_id":     row.id,
+        "agent_id":     row.agent_id,
+        "policy_id":    row.policy_id,
+        "query":        row.query,
+        "context":      row.context,
+        "risk_score":   row.risk_score,
+        "status":       row.status,
+        "risk_reasons": row.risk_reasons,
+        "action_taken": row.action_taken,
+        "created_at":   row.created_at,
+    }
+
+
+@query_audit_router.get("/response/{audit_id}")
+def get_response_audit(audit_id: str, db: Session = Depends(get_db)) -> dict:
+    """Feature 2 응답의 audit_id로 응답 감사 로그 단건 조회."""
+    row = db.query(ResponseAuditLogModel).filter(ResponseAuditLogModel.id == audit_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"audit_id={audit_id} 없음")
+
+    return {
+        "audit_id":         row.id,
+        "query_audit_id":   row.query_audit_id,
+        "agent_id":         row.agent_id,
+        "policy_id":        row.policy_id,
+        "query":            row.query,
+        "response":         row.response,
+        "compliance_score": row.compliance_score,
+        "status":           row.status,
+        "violations":       row.violations,
+        "created_at":       row.created_at,
+    }

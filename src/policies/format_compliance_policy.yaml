@@ -1,7 +1,10 @@
 id: "FORMAT_001"
 name: "response_format_compliance"
 version: "2.1.0"
-enabled: true
+# COMP_001(compliance_policy)와 required_json_keys 가 상호 배타적이라
+# 같은 응답에 대해 둘 다 활성이면 항상 한쪽이 BLOCK 됨. 운영 시점에는 둘 중 하나만 활성화 권장.
+# 기본 출시 구성에서는 COMP_001(answer/source/confidence) 사용. 본 정책은 비활성.
+enabled: false
 type: "rule"
 judge_required: "never"
 severity: "high"

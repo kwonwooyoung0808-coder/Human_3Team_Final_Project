@@ -1,5 +1,5 @@
-id: "CONTENT_001"
-name: "content_safety"
+id: "CONTENT_002"
+name: "content_safety_detailed"
 version: "2.1.0"
 enabled: true
 type: "rule"

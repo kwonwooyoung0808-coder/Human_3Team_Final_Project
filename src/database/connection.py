@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,7 +29,55 @@ def init_db() -> bool:
 
     try:
         Base.metadata.create_all(bind=engine)
+        seed_existing_policies()
         return True
     except SQLAlchemyError as exc:
         logger.warning("Database initialization skipped because the database is unavailable: %s", exc)
         return False
+
+
+def seed_existing_policies() -> None:
+    """
+    src/policies/ 의 기존 YAML 파일을 policies 테이블에 자동 등록.
+    이미 존재하는 id는 건너뜀 (멱등성 보장).
+    Feature 1/2가 기존 정책을 즉시 사용할 수 있도록 is_active=TRUE로 등록.
+    """
+    from src.database.models import PolicyModel
+    from src.utils.yaml_loader import PolicyLoaderError, load_policy
+
+    try:
+        policy_dir = Path(settings.policy_dir)
+        if not policy_dir.exists():
+            return
+
+        session = SessionLocal()
+        try:
+            for yaml_path in sorted(policy_dir.glob("*.yaml")):
+                try:
+                    policy = load_policy(yaml_path)
+                except PolicyLoaderError:
+                    continue
+
+                exists = session.query(PolicyModel).filter(
+                    PolicyModel.id == policy.id
+                ).first()
+                if exists:
+                    continue
+
+                # YAML 의 enabled 플래그를 DB 의 is_active 와 매핑
+                # (enabled: false 정책은 등록되지만 비활성 상태로 — 추후 PUT /activate 로 켤 수 있음)
+                session.add(PolicyModel(
+                    id=policy.id,
+                    name=policy.name,
+                    version=policy.version or "1.0",
+                    yaml_path=str(yaml_path),
+                    is_active=bool(getattr(policy, "enabled", True)),
+                ))
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.warning("Policy seeding failed: %s", e)
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning("seed_existing_policies skipped: %s", e)

@@ -1,0 +1,374 @@
+from __future__ import annotations
+
+import asyncio
+import uuid
+from functools import lru_cache
+
+from langgraph.graph import END, StateGraph
+
+from src.database.connection import SessionLocal
+from src.database.models import ResponseAuditLogModel
+from src.engines.judge_engine import JudgeEngine
+from src.engines.policy_engine import PolicyEngine
+from src.schemas.compliance import ComplianceState
+from src.schemas.policy import Policy
+from src.services.ollama_client import OllamaClient
+from src.utils.yaml_loader import load_policy
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 1: 정책 로더 (DB → yaml_path → Policy 객체)
+# ──────────────────────────────────────────────────────────────
+def policy_loader_node(state: ComplianceState) -> dict:
+    """
+    DB의 policies 테이블에서 policy_id로 yaml_path 조회.
+    is_active=TRUE인 정책만 허용.
+    실패 → rule_rejected=True + rule_violations에 사유 명시 (F2-9 대응).
+    """
+    from src.database.models import PolicyModel
+
+    session = SessionLocal()
+    try:
+        row = session.query(PolicyModel).filter(
+            PolicyModel.id == state["policy_id"],
+            PolicyModel.is_active == True,
+        ).first()
+
+        if not row:
+            return {
+                "error_message": f"policy_id={state['policy_id']} 활성 정책 없음",
+                "rule_rejected": True,
+                "rule_violations": [{
+                    "type": "POLICY_NOT_FOUND",
+                    "description": f"policy_id={state['policy_id']} 활성 정책 없음",
+                    "severity": "HIGH",
+                }],
+            }
+
+        policy = load_policy(row.yaml_path)
+        return {"policy": policy.model_dump()}
+
+    except Exception as e:
+        return {
+            "error_message": str(e),
+            "rule_rejected": True,
+            "rule_violations": [{
+                "type": "POLICY_LOAD_ERROR",
+                "description": f"정책 로드 실패: {e}",
+                "severity": "HIGH",
+            }],
+        }
+    finally:
+        session.close()
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 2: 룰 컴플라이언스 (기존 PolicyEngine 재사용)
+# ──────────────────────────────────────────────────────────────
+def rule_compliance_node(state: ComplianceState) -> dict:
+    """
+    기존 PolicyEngine을 response 대상으로 실행.
+    HIGH severity 위반 → rule_rejected=True → LLM 생략.
+    위반은 rule_violations 에 보존 (rule_rejected 경로에서도 응답/audit에 노출되도록).
+    """
+    policy_dict = state.get("policy", {})
+    if not policy_dict:
+        return {
+            "rule_rejected": True,
+            "rule_violations": [{
+                "type": "POLICY_MISSING",
+                "description": "정책 데이터 없음",
+                "severity": "HIGH",
+            }],
+        }
+
+    try:
+        policy = Policy(**policy_dict)
+    except Exception as e:
+        return {
+            "rule_rejected": True,
+            "rule_violations": [{
+                "type": "POLICY_INVALID",
+                "description": f"정책 스키마 검증 실패: {e}",
+                "severity": "HIGH",
+            }],
+        }
+
+    engine = PolicyEngine()
+    result = engine.evaluate_policy(
+        policy=policy,
+        response=state["response"],
+        context={},
+        retrieved_context=None,
+    )
+
+    violations: list[dict] = []
+    if result.triggered:
+        for span in result.evidence_spans:
+            violations.append({
+                "type":        span.get("condition", "RULE"),
+                "description": span.get("human_reason", result.reason),
+                "severity":    "HIGH" if result.recommended_action == "BLOCK" else "MEDIUM",
+            })
+        # evidence_spans 가 비어 있어도 위반은 명시
+        if not violations:
+            violations.append({
+                "type":        "RULE",
+                "description": result.reason,
+                "severity":    "HIGH" if result.recommended_action == "BLOCK" else "MEDIUM",
+            })
+
+    rejected = result.triggered and result.recommended_action == "BLOCK"
+    return {"rule_violations": violations, "rule_rejected": rejected}
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 3: LLM 컴플라이언스 평가 — Self-Consistency Check (PRD 5.2.2)
+# ──────────────────────────────────────────────────────────────
+# F2-2: PRD 5.2.2 "Hallucination 여부: LLM Self-Consistency Check"
+#   → temperature=0.0 (결정론) + temperature=0.7 (변형) 두 호출 비교
+#   → 두 호출이 일치하면 신뢰도 높음, 불일치하면 INCONSISTENT 위반 추가
+# F2-3: PRD 5.2.2 "Bias 표현 포함 여부: LLM 평가"
+#   → 정책 criteria 와 별개로 bias / hallucination 체크 항목을 항상 프롬프트에 포함
+
+_BIAS_HALLUCINATION_CRITERIA = """
+[필수 검증 항목 — PRD 5.2.2]
+정책 기준과 별개로 아래 두 항목을 항상 평가하라:
+1. Hallucination: 응답이 검증 불가능한 사실 주장을 하는가? 외부 사실에 근거 없는 단정이 있는가?
+2. Bias: 응답에 특정 집단/성별/인종/연령에 대한 비교, 차별, 비하 표현이 있는가?
+어느 하나라도 해당하면 verdict="FAIL" 로 판정하라.
+"""
+
+
+async def llm_compliance_agent_node(state: ComplianceState) -> dict:
+    """
+    JudgeEngine 의 프롬프트 조립 + OllamaClient 비동기 chat() 조합.
+    Self-Consistency: 2회 호출 (temperature 0.0 / 0.7) 후 verdict 비교.
+    실패 → FLAGGED Fallback (score=0.5 + LLM_ERROR violation).
+    """
+    policy_dict = state.get("policy", {})
+    if not policy_dict:
+        return {
+            "llm_compliance_score": 0.5,
+            "llm_violations": [
+                {"type": "SYSTEM", "description": "정책 로드 실패", "severity": "HIGH"}
+            ],
+        }
+
+    try:
+        from src.core.config import get_settings
+        settings = get_settings()
+
+        policy = Policy(**policy_dict)
+        judge_engine = JudgeEngine(prompt_dir=settings.prompt_dir)
+
+        system_tmpl = judge_engine._read_prompt("system_judge_v2.txt")
+        cot_tmpl = judge_engine._read_prompt("cot_reasoning_v2.txt")
+        few_shot_str = judge_engine._get_filtered_few_shot(policy.id)
+
+        # F2-3: bias + hallucination 검증을 정책 criteria 에 추가
+        criteria_full = (policy.judge.criteria or "") + _BIAS_HALLUCINATION_CRITERIA
+
+        rendered = (
+            f"{system_tmpl}\n\n{cot_tmpl}\n\n{few_shot_str}"
+        ).format(
+            user_query=state.get("query", ""),
+            retrieved_context="N/A",
+            assistant_response=state["response"],
+            criteria=criteria_full,
+        )
+
+        client = OllamaClient()
+        # F2-2: Self-Consistency Check — 2회 병렬 호출
+        raw_low, raw_high = await asyncio.gather(
+            client.generate(rendered, temperature=0.0),
+            client.generate(rendered, temperature=0.7),
+            return_exceptions=False,
+        )
+
+        result_low = judge_engine._parse_llm_json_result(raw_low)
+        result_high = judge_engine._parse_llm_json_result(raw_high)
+
+        if not result_low or not result_high:
+            raise ValueError("LLM 파싱 실패")
+
+        violations: list[dict] = []
+
+        # 두 호출 verdict 비교
+        if result_low.verdict == "FAIL" and result_high.verdict == "FAIL":
+            # 일관된 FAIL → 정책 위반 확정
+            avg_conf = (result_low.confidence + result_high.confidence) / 2
+            score = 1.0 - avg_conf
+            violations.append({
+                "type":        "LLM_COMPLIANCE",
+                "description": result_low.reason,
+                "severity":    "HIGH" if avg_conf >= 0.8 else "MEDIUM",
+            })
+        elif result_low.verdict == "PASS" and result_high.verdict == "PASS":
+            # 일관된 PASS → 위반 없음
+            score = (result_low.confidence + result_high.confidence) / 2
+        else:
+            # 불일치 → Self-Consistency 실패 (잠재적 hallucination/불안정 응답)
+            score = 0.5
+            failed = result_low if result_low.verdict == "FAIL" else result_high
+            violations.append({
+                "type":        "INCONSISTENT_RESPONSE",
+                "description": (
+                    f"Self-Consistency Check 실패: 동일 응답을 2회 평가했으나 "
+                    f"verdict 불일치 (low_temp={result_low.verdict}, "
+                    f"high_temp={result_high.verdict}). "
+                    f"FAIL 판정 사유: {failed.reason}"
+                ),
+                "severity":    "MEDIUM",
+            })
+
+        return {"llm_compliance_score": score, "llm_violations": violations}
+
+    except Exception as e:
+        return {
+            "llm_compliance_score": 0.5,
+            "llm_violations": [
+                {"type": "LLM_ERROR", "description": str(e), "severity": "MEDIUM"}
+            ],
+        }
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 4: 위반 집계
+# ──────────────────────────────────────────────────────────────
+def violation_aggregator_node(state: ComplianceState) -> dict:
+    """
+    rule_violations + llm_violations 병합.
+    동일 type 중복 제거 (더 높은 severity 유지).
+    severity 내림차순 정렬 (HIGH → MEDIUM → LOW).
+    """
+    severity_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    seen: dict[str, dict] = {}
+
+    for v in (state.get("rule_violations", []) or []) + (state.get("llm_violations", []) or []):
+        vtype = v.get("type", "UNKNOWN")
+        if vtype not in seen:
+            seen[vtype] = v
+        else:
+            if severity_rank.get(v.get("severity", "LOW"), 2) < severity_rank.get(
+                seen[vtype].get("severity", "LOW"), 2
+            ):
+                seen[vtype] = v
+
+    merged = sorted(
+        seen.values(),
+        key=lambda x: severity_rank.get(x.get("severity", "LOW"), 2),
+    )
+    return {"all_violations": merged}
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 5: 최종 액션 결정 (결정론적)
+# ──────────────────────────────────────────────────────────────
+def action_engine_node(state: ComplianceState) -> dict:
+    """
+    F2-1 fallback: rule_rejected 경로에서 violation_aggregator 우회 시
+                   rule_violations + llm_violations 를 직접 결합.
+
+    rule_rejected=True 또는 HIGH severity 위반 ≥ 1건  → REJECTED (final_score=0.0)
+    MEDIUM 위반 존재 (HIGH 없음)                       → FLAGGED
+    위반 없음                                          → APPROVED
+    """
+    rule_violations = state.get("rule_violations", []) or []
+    llm_violations = state.get("llm_violations", []) or []
+
+    aggregated = state.get("all_violations")
+    if not aggregated:
+        # rule_rejected 경로에서 violation_aggregator 가 우회된 경우 fallback
+        aggregated = rule_violations + llm_violations
+
+    has_high = any(v.get("severity") == "HIGH" for v in aggregated)
+    has_medium = any(v.get("severity") == "MEDIUM" for v in aggregated)
+    llm_score = state.get("llm_compliance_score", 1.0)
+
+    if state.get("rule_rejected") or has_high:
+        # REJECTED 시 final_score 는 0.0 (위반인데 LLM score가 높게 나오는 의미 모순 방지)
+        return {
+            "final_status":   "REJECTED",
+            "final_score":    0.0,
+            "all_violations": aggregated,
+        }
+    if has_medium:
+        return {
+            "final_status":   "FLAGGED",
+            "final_score":    llm_score,
+            "all_violations": aggregated,
+        }
+    return {
+        "final_status":   "APPROVED",
+        "final_score":    llm_score,
+        "all_violations": aggregated,
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# 노드 6: 감사 로그 저장
+# ──────────────────────────────────────────────────────────────
+def audit_logger_node(state: ComplianceState) -> dict:
+    """
+    response_audit_logs 테이블 INSERT (INSERT ONLY).
+    audit_query_id로 Feature 1 감사 로그와 선택적 연결.
+    PRD 5.2.6: 모든 평가 결과는 근거(violations)와 함께 저장.
+    """
+    audit_id = str(uuid.uuid4())
+    session = SessionLocal()
+    try:
+        session.add(ResponseAuditLogModel(
+            id=audit_id,
+            query_audit_id=state.get("audit_query_id"),
+            agent_id=state["agent_id"],
+            policy_id=state["policy_id"],
+            query=state["query"],
+            response=state["response"],
+            compliance_score=state.get("final_score", 0.0),
+            status=state.get("final_status", "APPROVED"),
+            violations=state.get("all_violations", []),
+        ))
+        session.commit()
+        return {"audit_id": audit_id}
+    except Exception as e:
+        session.rollback()
+        return {"audit_id": audit_id, "error_message": f"감사 로그 저장 실패: {e}"}
+    finally:
+        session.close()
+
+
+# ──────────────────────────────────────────────────────────────
+# 그래프 조립
+# ──────────────────────────────────────────────────────────────
+@lru_cache
+def build_compliance_graph():
+    graph = StateGraph(ComplianceState)
+
+    graph.add_node("policy_loader",        policy_loader_node)
+    graph.add_node("rule_compliance",      rule_compliance_node)
+    graph.add_node("llm_compliance_agent", llm_compliance_agent_node)
+    graph.add_node("violation_aggregator", violation_aggregator_node)
+    graph.add_node("action_engine",        action_engine_node)
+    graph.add_node("audit_logger",         audit_logger_node)
+
+    graph.set_entry_point("policy_loader")
+
+    # 정책 로더 실패 → 즉시 action_engine (REJECTED, F2-1 fallback으로 violations 보존)
+    graph.add_conditional_edges(
+        "policy_loader",
+        lambda s: "action_engine" if s.get("rule_rejected") else "rule_compliance",
+        {"action_engine": "action_engine", "rule_compliance": "rule_compliance"},
+    )
+    # 룰 위반 확정 → LLM 생략 (비용 절감, F2-1 fallback으로 violations 보존)
+    graph.add_conditional_edges(
+        "rule_compliance",
+        lambda s: "action_engine" if s.get("rule_rejected") else "llm_compliance_agent",
+        {"action_engine": "action_engine", "llm_compliance_agent": "llm_compliance_agent"},
+    )
+    graph.add_edge("llm_compliance_agent", "violation_aggregator")
+    graph.add_edge("violation_aggregator", "action_engine")
+    graph.add_edge("action_engine",        "audit_logger")
+    graph.add_edge("audit_logger",         END)
+
+    return graph.compile()
