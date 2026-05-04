@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from src.schemas.action import ActionResult
 from src.schemas.judge import JudgeResult
@@ -13,11 +13,11 @@ PolicyResultEntry = tuple[Policy, PolicyEvaluationResult]
 
 
 class EvaluateRequest(BaseModel):
-    run_id: str | None = None
-    input: str
-    response: str | None = None
+    run_id: StrictStr | None = Field(default=None, min_length=1)
+    input: StrictStr = Field(min_length=1)
+    response: StrictStr | None = None
     context: dict[str, Any] = Field(default_factory=dict)
-    retrieved_context: list[str] | None = None
+    retrieved_context: list[StrictStr] | None = None
 
     @model_validator(mode="after")
     def ensure_run_id(self) -> "EvaluateRequest":
@@ -72,12 +72,12 @@ class WorkflowState(BaseModel):
 
 class TraceNodeCreate(BaseModel):
     """TraceLogger에서 DB에 저장하기 전 데이터를 검증하는 스키마"""
-    run_id: str
-    workflow_name: str
-    node_name: str
-    node_type: str
-    latency_ms: float = 0.0
-    status: str = "completed"
+    run_id: StrictStr = Field(min_length=1)
+    workflow_name: StrictStr = Field(min_length=1)
+    node_name: StrictStr = Field(min_length=1)
+    node_type: StrictStr = Field(min_length=1)
+    latency_ms: float = Field(default=0.0, ge=0.0)
+    status: StrictStr = Field(default="completed", min_length=1)
 
 
 class RunResponse(BaseModel):

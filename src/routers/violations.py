@@ -1,15 +1,19 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.core.dependencies import get_db
 from src.database.models import EvidenceSpanModel, ViolationModel
+from src.schemas.violation import ViolationRead
 
 router = APIRouter(prefix="/api/v1", tags=["violations"])
 
 
-@router.get("/violations")
-def list_violations(limit: int = 100, db: Session = Depends(get_db)):
+@router.get("/violations", response_model=list[ViolationRead])
+def list_violations(
+    limit: int = Query(default=10, ge=1, le=100, description="Number of violations to return."),
+    db: Session = Depends(get_db),
+):
     rows = list(db.scalars(select(ViolationModel).order_by(ViolationModel.created_at.desc()).limit(limit)))
     payload = []
     for row in rows:
@@ -44,4 +48,3 @@ def list_violations(limit: int = 100, db: Session = Depends(get_db)):
             }
         )
     return payload
-

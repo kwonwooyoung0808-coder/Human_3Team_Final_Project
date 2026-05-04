@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from src.core.dependencies import get_db
@@ -12,7 +12,10 @@ router = APIRouter(prefix="/api/v1/runs", tags=["runs"])
 
 # 1. response_model=RunResponse를 추가하여 Swagger(API 문서)에 응답 규격이 보이도록 합니다.
 @router.get("/{run_id}", response_model=RunResponse)
-def get_run(run_id: str, db: Session = Depends(get_db)):
+def get_run(
+    run_id: str = Path(min_length=1, description="Run identifier."),
+    db: Session = Depends(get_db),
+):
     run = db.get(WorkflowRunModel, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
@@ -38,7 +41,10 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
 
 # Trace 조회 API는 이미 완벽하게 작성되어 있으므로 그대로 둡니다.
 @router.get("/{run_id}/trace", response_model=RunTraceSummary)
-def get_trace(run_id: str, db: Session = Depends(get_db)) -> RunTraceSummary:
+def get_trace(
+    run_id: str = Path(min_length=1, description="Run identifier."),
+    db: Session = Depends(get_db),
+) -> RunTraceSummary:
     run = db.get(WorkflowRunModel, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
