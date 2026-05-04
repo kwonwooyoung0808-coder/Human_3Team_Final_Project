@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -26,3 +27,7 @@ class Violation(BaseModel):
     evidence_span: EvidenceSpan | None = None
     judge_verdict: str | None = None
     judge_confidence: float | None = None
+
+
+class ViolationRead(Violation):
+    created_at: datetime
