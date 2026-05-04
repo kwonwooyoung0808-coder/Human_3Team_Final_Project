@@ -4,7 +4,12 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.schemas.action import ActionResult
+from src.schemas.judge import JudgeResult
+from src.schemas.policy import Policy, PolicyEvaluationResult
 from src.schemas.violation import Violation
+
+PolicyResultEntry = tuple[Policy, PolicyEvaluationResult]
 
 
 class EvaluateRequest(BaseModel):
@@ -24,7 +29,7 @@ class EvaluateRequest(BaseModel):
 class EvaluateResponse(BaseModel):
     run_id: str
     has_violation: bool
-    final_action: Literal["BLOCK", "LOG"]
+    final_action: Literal["BLOCK", "LOG", "PASS", "FLAGGED"]
     final_response: str
     violations: list[Violation] = Field(default_factory=list)
 
@@ -51,9 +56,17 @@ class RunTraceSummary(BaseModel):
 class WorkflowState(BaseModel):
     run_id: str
     user_input: str
-    final_response: str
+    requested_response: str | None = None
+    generated_response: str | None = None
+    final_response: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     retrieved_context: list[str] | None = None
+    policy_results: list[PolicyResultEntry] = Field(default_factory=list)
+    judge_results: dict[str, JudgeResult] = Field(default_factory=dict)
+    violations: list[Violation] = Field(default_factory=list)
+    action: ActionResult | None = None
+    status: str = "running"
+    error_message: str | None = None
 
 # --- [추가해야 할 부분] ---
 
@@ -78,4 +91,3 @@ class RunResponse(BaseModel):
     workflow_name: str
     context: dict[str, Any]
     created_at: datetime
-

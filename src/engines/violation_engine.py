@@ -23,7 +23,8 @@ class ViolationEngine:
 
         if raw_evidence:
             evidence_span = EvidenceSpan(**raw_evidence, confidence=1.0)
-            risk_score = 0.98 if policy.action.type == "BLOCK" else 0.75
+            # [수정 1] risk_score 계산 시에도 앞단에서 확정된 액션을 참조하도록 변경 (논리적 버그 방지)
+            risk_score = 0.98 if result.recommended_action == "BLOCK" else 0.75
         else:
             text = (judge_result.evidence_text if judge_result else None) or response[:120]
             evidence_span = EvidenceSpan(
@@ -45,10 +46,11 @@ class ViolationEngine:
             policy_name=policy.name,
             reason=reason,
             source=source,
-            recommended_action=policy.action.type,
+            # [수정 2] 500 에러(Validation Error)의 핵심 원인 해결
+            # Policy 스키마 원본 대신 PolicyEvaluationResult에 담긴 안전한 값을 사용
+            recommended_action=result.recommended_action,
             risk_score=min(max(risk_score, 0.0), 1.0),
             evidence_span=evidence_span,
             judge_verdict=judge_result.verdict if judge_result else None,
             judge_confidence=judge_result.confidence if judge_result else None,
         )
-

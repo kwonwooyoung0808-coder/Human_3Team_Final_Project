@@ -12,7 +12,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    init_db()
+    app.state.db_available = init_db()
     yield
 
 
@@ -20,12 +20,14 @@ app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health", tags=["health"])
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, str | bool]:
+    return {
+        "status": "ok",
+        "db_available": getattr(app.state, "db_available", False),
+    }
 
 
 app.include_router(evaluate.router)
 app.include_router(runs.router)
 app.include_router(violations.router)
 app.include_router(audit.router)
-

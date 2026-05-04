@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -10,8 +11,7 @@ from src.schemas.audit import AuditLogCreate
 from src.schemas.workflow import EvaluateRequest, EvaluateResponse
 from src.services.audit_logger import AuditLogger
 from src.services.trace_logger import TraceLogger
-from src.workflows.agent_workflow import generate_workflow_state
-from src.workflows.interceptors.interceptor import evaluate_final_response
+from src.workflows.agent_workflow import execute_workflow
 
 router = APIRouter(prefix="/api/v1", tags=["evaluate"])
 
@@ -19,15 +19,37 @@ router = APIRouter(prefix="/api/v1", tags=["evaluate"])
 @router.post("/evaluate", response_model=EvaluateResponse)
 def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> EvaluateResponse:
     settings = get_settings()
+    db.merge(
+        WorkflowRunModel(
+            run_id=request.run_id,
+            input=request.input,
+            output=request.response or "",
+            final_status="running",
+            final_action="LOG",
+            has_violation=False,
+            workflow_name=settings.workflow_name,
+            context_json=json.dumps(request.context),
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
     trace_logger = TraceLogger(db)
     trace_logger.log_node(request.run_id, settings.workflow_name, "input", "api")
 
-    state = generate_workflow_state(request)
+    state = execute_workflow(request)
     trace_logger.log_node(request.run_id, settings.workflow_name, "generator", "fake_llm")
-
-    violations, action = evaluate_final_response(state)
-    trace_logger.log_node(request.run_id, settings.workflow_name, "governance_interceptor", "policy")
+    trace_logger.log_node(request.run_id, settings.workflow_name, "policy_evaluator", "policy")
+    if state.judge_results:
+        trace_logger.log_node(request.run_id, settings.workflow_name, "judge_engine", "judge")
+    if state.violations:
+        trace_logger.log_node(request.run_id, settings.workflow_name, "violation_builder", "violation")
     trace_logger.log_node(request.run_id, settings.workflow_name, "action_engine", "action")
+
+    violations = state.violations
+    action = state.action
+    if action is None:
+        raise RuntimeError("Workflow completed without an action result.")
 
     db.merge(
         WorkflowRunModel(
@@ -39,6 +61,9 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             has_violation=bool(violations),
             workflow_name=settings.workflow_name,
             context_json=json.dumps(request.context),
+            # Reusing the same run_id should still reflect the latest execution time
+            # in GET /runs/{run_id} and /runs/{run_id}/trace summaries.
+            created_at=datetime.now(timezone.utc),
         )
     )
     db.commit()
@@ -58,6 +83,7 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
                 judge_confidence=violation.judge_confidence,
             )
         )
+        db.flush()
         if violation.evidence_span:
             db.add(
                 EvidenceSpanModel(
@@ -92,4 +118,3 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
         final_response=action.delivered_response,
         violations=violations,
     )
-

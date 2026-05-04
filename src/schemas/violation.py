@@ -21,9 +21,8 @@ class Violation(BaseModel):
     policy_name: str
     reason: str
     source: Literal["rule", "judge"]
-    recommended_action: Literal["BLOCK", "LOG"]
+    recommended_action: Literal["BLOCK", "LOG", "FLAGGED"]
     risk_score: float = Field(ge=0.0, le=1.0)
     evidence_span: EvidenceSpan | None = None
     judge_verdict: str | None = None
     judge_confidence: float | None = None
-
