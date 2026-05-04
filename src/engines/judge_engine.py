@@ -203,7 +203,7 @@ class JudgeEngine:
         # 2. LLM 호출 및 에러 처리
         try:
             if self.llm_client:
-                raw_llm_output = self.llm_client.generate(rendered_prompt)
+                raw_llm_output = self.llm_client.invoke(rendered_prompt).content
             else:
                 raw_llm_output = None # 테스트용
         except Exception as e:

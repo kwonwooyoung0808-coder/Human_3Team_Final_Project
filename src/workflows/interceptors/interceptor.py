@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+import ollama as _ollama
+
 from src.core.config import get_settings
 from src.engines.action_engine import ActionEngine
 from src.engines.judge_engine import JudgeEngine
@@ -14,6 +18,24 @@ from src.workflows.state import (
     apply_violations,
 )
 
+
+class _OllamaClient:
+    """ollama 패키지 기반 LLM 래퍼 (langchain 없이 LangGraph 워크플로와 통합)"""
+
+    def __init__(self, model: str, temperature: float, base_url: str):
+        self.model = model
+        self.temperature = temperature
+        self.base_url = base_url
+
+    def invoke(self, prompt: str) -> SimpleNamespace:
+        result = _ollama.generate(
+            model=self.model,
+            prompt=prompt,
+            options={"temperature": self.temperature},
+        )
+        return SimpleNamespace(content=result["response"])
+
+
 def run_policy_stage(state: WorkflowState) -> WorkflowState:
     settings = get_settings()
     policy_results = collect_policy_results(
@@ -26,10 +48,15 @@ def run_policy_stage(state: WorkflowState) -> WorkflowState:
 
 def run_judge_stage(state: WorkflowState) -> WorkflowState:
     settings = get_settings()
+    llm = _OllamaClient(
+        model=settings.ollama_model,
+        temperature=settings.ollama_temperature,
+        base_url=settings.ollama_url,
+    )
     judge_results = collect_judge_results(
         state=state,
         policies=state.policy_results,
-        judge_engine=JudgeEngine(settings.prompt_dir),
+        judge_engine=JudgeEngine(settings.prompt_dir, llm_client=llm),
     )
     return apply_judge_results(state, judge_results)
 
