@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,7 +11,10 @@ router = APIRouter(prefix="/api/v1", tags=["audit"])
 
 # response_model을 지정해 주어야 Swagger에 문서화됩니다.
 @router.get("/audit-logs", response_model=list[AuditLogResponse])
-def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
+def list_audit_logs(
+    limit: int = Query(default=10, ge=1, le=100, description="Number of audit logs to return."),
+    db: Session = Depends(get_db),
+):
     rows = list(db.scalars(select(AuditLogModel).order_by(AuditLogModel.created_at.desc()).limit(limit)))
     result = []
     for row in rows:
