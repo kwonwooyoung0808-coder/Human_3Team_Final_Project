@@ -1,181 +1,227 @@
 import json
 import re
+import logging
 from pathlib import Path
+from typing import Dict, Any, Set
+
 import yaml
 from src.core.config import get_settings
 from src.schemas.judge import JudgeResult
 from src.schemas.policy import Policy
 
+# 로깅 설정
+logger = logging.getLogger(__name__)
+
 class JudgeEngine:
     """
-    [Final Version] 
-    - 재시도 제한 로직 대응을 위한 신뢰도 설계
-    - 심각도(Severity) 기반 차단 차등화 (Critical vs Warning)
-    - LLM 장애 시나리오별 Fallback 전략 포함
+    [Final Optimized Version] 
+    - 정책 기반 동적 판정 및 액션 결정 엔진
+    - 데이터 캐싱을 통한 성능 최적화
+    - 심각도(Severity) 및 신뢰도 기반 차등 액션 적용
     """
+    
+    # 하위 호환성을 위한 기본 카테고리 매핑
+    DEFAULT_CATEGORY_MAPPING = {
+        "HAL": "groundedness",
+        "CONTENT": "content_safety",
+        "CTX": "instruction_compliance",
+        "FORMAT": "instruction_compliance"
+    }
+
     def __init__(self, prompt_dir: str | None = None, llm_client=None):
         self.prompt_dir = Path(prompt_dir or get_settings().prompt_dir)
-        self.llm_client = llm_client # 실제 연결 시 주입
+        self.llm_client = llm_client
+        self._prompt_cache: Dict[str, str] = {}
+        self._few_shot_cache: Dict[str, Any] = {}
 
     def _read_prompt(self, name: str) -> str:
-        """프롬프트 파일(.txt, .yaml)을 읽어옵니다."""
+        """프롬프트 파일을 읽고 캐싱합니다."""
+        if name in self._prompt_cache:
+            return self._prompt_cache[name]
+        
         path = self.prompt_dir / name
         if not path.exists():
+            logger.warning(f"Prompt file not found: {path}")
             return ""
-        return path.read_text(encoding="utf-8")
+        
+        content = path.read_text(encoding="utf-8")
+        self._prompt_cache[name] = content
+        return content
 
-    def _get_filtered_few_shot(self, policy_id: str) -> str:
+    def _get_filtered_few_shot(self, policy: Policy) -> str:
         """
-        [PRD 최적화] 정책 ID에 맞는 Few-shot 예시만 필터링하여 프롬프트 크기를 줄이고 정확도를 높입니다.
-        - CONTENT: 유해성 판정 예시
-        - GROUND: 근거 기반 판정 예시
-        - COMP: 형식 준수 판정 예시
+        [최적화] 정책 카테고리에 맞는 Few-shot 예시를 필터링합니다.
         """
-        full_content = self._read_prompt("few_shot_examples_v2.yaml")
-        if not full_content:
-            return ""
+        category = policy.category or ""
+        
+        # 1. 예시 데이터 로드 및 캐싱
+        if "few_shot_examples_v2.yaml" not in self._few_shot_cache:
+            full_content = self._read_prompt("few_shot_examples_v2.yaml")
+            if not full_content:
+                return ""
+            try:
+                self._few_shot_cache["few_shot_examples_v2.yaml"] = yaml.safe_load(full_content).get("examples", {})
+            except Exception as e:
+                logger.error(f"Error parsing few-shot YAML: {e}")
+                return ""
 
-        try:
-            data = yaml.safe_load(full_content)
-            all_examples = data.get("examples", {})
-            filtered_examples = {}
+        all_examples = self._few_shot_cache["few_shot_examples_v2.yaml"]
+        filtered_examples = {}
 
-            # 정책 ID 접두어에 따른 예시 그룹 매칭
-            if "CONTENT" in policy_id:
-                target_key_prefix = "content_safety"
-            elif "GROUND" in policy_id:
-                target_key_prefix = "groundedness"
-            elif "COMP" in policy_id:
-                target_key_prefix = "instruction_compliance"
-            else:
-                target_key_prefix = "none"
+        # 2. 매칭 타겟 결정 (카테고리 -> ID 프리픽스 순)
+        target_prefix = category.lower()
+        if not target_prefix:
+            for prefix, mapped_cat in self.DEFAULT_CATEGORY_MAPPING.items():
+                if prefix in policy.id.upper():
+                    target_prefix = mapped_cat
+                    break
 
+        # 3. 필터링 수행
+        if target_prefix:
             for key, val in all_examples.items():
-                if key.startswith(target_key_prefix):
+                if key.startswith(target_prefix):
                     filtered_examples[key] = val
 
-            if not filtered_examples:
-                return "No relevant few-shot examples found."
+        if not filtered_examples:
+            return "No relevant few-shot examples found."
 
-            return yaml.dump({"examples": filtered_examples}, allow_unicode=True, sort_keys=False)
-        except Exception:
-            return "Error parsing few-shot examples."
+        return yaml.dump({"examples": filtered_examples}, allow_unicode=True, sort_keys=False)
 
     def _extract_judged_text(self, response: str) -> str:
-        """
-        [데이터 정규화] 응답이 JSON 형태인 경우 'answer' 필드의 본문만 추출하여 판정 대상을 명확히 합니다.
-        """
+        """JSON 응답인 경우 본문 텍스트만 추출합니다."""
         try:
             parsed = json.loads(response)
-            if isinstance(parsed, dict):
-                answer = parsed.get("answer")
-                if isinstance(answer, str) and answer.strip():
-                    return answer.strip()
-        except json.JSONDecodeError:
+            if isinstance(parsed, dict) and "answer" in parsed:
+                return str(parsed["answer"]).strip()
+        except (json.JSONDecodeError, TypeError):
             pass
         return response.strip()
 
-    def _judge_groundedness_fallback(
-        self,
-        response: str,
-        retrieved_context: list[str] | None,
-    ) -> JudgeResult:
+    @staticmethod
+    def _tokenize(text: str) -> Set[str]:
+        """구두점을 제거한 뒤 단어 집합을 반환합니다 (한국어/영어 공통).
+
+        [수정 이유] 기존 fallback은 응답 전체 문자열이 컨텍스트에 완전히 포함되는지를
+        확인했으나(judged_text in context_text), 자연어 응답은 표현이 조금만 달라도
+        항상 FAIL로 판정되는 문제가 있었음. 구두점 제거 후 토큰 단위로 비교하면
+        한국어·영어 모두에서 의미 있는 유사도를 측정할 수 있음.
         """
-        [B-4 대응] LLM 장애 시나리오를 위한 문자열 매칭 기반의 최소한의 Groundedness 판정 로직입니다.
+        return {t for t in re.sub(r'[^\w\s]', '', text).split() if len(t) > 1}
+
+    def _judge_groundedness_fallback(self, response: str, retrieved_context: list[str] | None) -> JudgeResult:
+        """LLM 장애 시 토큰 중복 비율 기반의 Fallback 환각 판정 로직입니다.
+
+        [수정 이유] 기존 단순 문자열 포함 검사(in 연산자)에서 토큰 중복 비율 방식으로 교체.
+        응답 토큰의 30% 이상이 컨텍스트 토큰과 겹치면 PASS로 처리하며,
+        신뢰도는 중복 비율에 비례해 0.5~0.9 범위로 산출함.
         """
         judged_text = self._extract_judged_text(response)
 
-        if not retrieved_context:
+        if not retrieved_context or not any(str(c).strip() for c in retrieved_context):
             return JudgeResult(
-                verdict="FAIL",
-                confidence=0.65,
-                reason="No retrieved context was provided.",
-                evidence_text=judged_text[:120] or None,
+                verdict="FAIL", confidence=0.6,
+                reason="No context provided for grounding check.",
+                evidence_text=judged_text[:100],
             )
 
-        cleaned_context = [str(item).strip() for item in retrieved_context if str(item).strip()]
-        if not cleaned_context:
-            return JudgeResult(
-                verdict="FAIL",
-                confidence=0.65,
-                reason="No meaningful retrieved context was provided.",
-                evidence_text=judged_text[:120] or None,
-            )
+        context_text = " ".join(str(c) for c in retrieved_context)
+        response_tokens = self._tokenize(judged_text)
+        context_tokens = self._tokenize(context_text)
 
-        context_text = " ".join(cleaned_context)
-        # 단순 포함 여부 확인 (LLM 연결 전 임시 로직)
-        if judged_text and judged_text in context_text:
-            return JudgeResult(
-                verdict="PASS",
-                confidence=0.9,
-                reason="The response is grounded in the provided context.",
-                evidence_text=None,
-            )
+        if response_tokens:
+            overlap = response_tokens & context_tokens
+            overlap_ratio = len(overlap) / len(response_tokens)
+            # 응답 토큰의 30% 이상이 컨텍스트에 존재하면 근거 있음으로 판정
+            if overlap_ratio >= 0.3:
+                return JudgeResult(
+                    verdict="PASS",
+                    confidence=min(0.5 + overlap_ratio * 0.4, 0.9),
+                    reason=f"Response is supported by context (Fallback, overlap: {overlap_ratio:.0%})",
+                )
 
         return JudgeResult(
-            verdict="FAIL",
-            confidence=0.72,
-            reason="The response is not sufficiently grounded in the provided context.",
-            evidence_text=judged_text[:120] or None,
+            verdict="FAIL", confidence=0.7,
+            reason="Response tokens not sufficiently found in context (Fallback)",
+            evidence_text=judged_text[:100],
         )
 
     def _parse_llm_json_result(self, raw_llm_output: str) -> JudgeResult | None:
-        """
-        [안정성 확보] LLM이 JSON 외에 앞뒤로 덧붙인 설명 문구에서 순수 JSON 부분만 정규식으로 추출합니다.
-        """
+        """LLM 출력에서 JSON을 추출하고 JudgeResult로 파싱합니다."""
         if not raw_llm_output:
             return None
 
-        # 정규표현식을 통해 가장 바깥쪽 { } 구간을 찾아냄
         json_match = re.search(r"\{.*\}", raw_llm_output, re.DOTALL)
         if not json_match:
             return None
 
         try:
-            parsed_result = json.loads(json_match.group())
-            return JudgeResult(**parsed_result)
+            parsed = json.loads(json_match.group())
+            return JudgeResult(**parsed)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.error(f"JSON parsing error: {e}")
             return JudgeResult(
-                verdict="FAIL",
-                confidence=0.0,
+                verdict="FAIL", confidence=0.0,
                 reason=f"Failed to parse LLM output: {str(e)}",
-                evidence_text=raw_llm_output[:100] or None,
+                evidence_text=raw_llm_output[:100]
             )
 
-    def _determine_action_by_severity(self, result: JudgeResult, policy_id: str) -> JudgeResult:
+    def _determine_action_by_severity(self, result: JudgeResult, policy: Policy) -> JudgeResult:
+        """판정 결과와 정책 메타데이터를 기반으로 최종 Action을 결정합니다.
+
+        [수정 이유 1 — 원본 불변] 기존 코드는 파라미터로 받은 result 객체의 필드를
+        직접 수정(in-place mutation)했음. 호출자가 원본 JudgeResult를 보유하고 있을 때
+        예상치 못한 사이드이펙트가 발생할 수 있으므로 model_copy()로 복사 후 수정.
+
+        [수정 이유 2 — category 우선순위] 기존 조건문은 category와 policy.id를 OR로
+        결합했기 때문에, category="groundedness"이지만 id에 "CONTENT"가 포함된 경우
+        content_safety 분기로 잘못 진입하는 버그가 있었음.
+        category가 명시된 경우 항상 category를 우선 적용하고,
+        category가 없을 때만 id 프리픽스를 fallback으로 사용하도록 재구성.
+
+        [수정 이유 3 — action.type None 안전 처리] PolicyAction.action.type은
+        Optional 필드이므로 None일 수 있음. 기존 코드는 None을 그대로 대입할 수
+        있었으므로 "Retry" 기본값으로 보호.
         """
-        [PRD B-1 반영] 판정 결과와 정책 성격에 따라 Severity와 Action을 결정합니다.
-        Action 유형: Block(즉시 차단), Warn(경고 후 노출), Retry(교정 시도), Allow(통과)
-        """
-        # 1. 보안/유해성 정책 (CONTENT) 위반 시 -> 무조건 Critical & Block
-        if result.verdict == "FAIL" and "CONTENT" in policy_id:
-            result.severity = "Critical"
-            result.action = "Block"
-            result.reason = f"[보안 정책 위반] {result.reason}"
+        # [수정 1] 원본 result를 직접 수정하지 않기 위해 복사본을 만들어 사용
+        result = result.model_copy()
 
-        # 2. 사실 근거 정책 (GROUND) 위반 시
-        elif result.verdict == "FAIL" and "GROUND" in policy_id:
-            # 신뢰도가 매우 낮으면 할루시네이션으로 판단하여 차단
-            if result.confidence < 0.6:
-                result.severity = "Critical"
-                result.action = "Block"
-                result.reason = f"[신뢰도 저하로 인한 차단] {result.reason}"
-            # 신뢰도가 중간 정도라면 교정을 위해 재시도 유도하거나 경고 노출
-            else:
-                result.severity = "Warning"
-                result.action = "Retry" # LangGraph에서 재시도 횟수 차감 후 루프
-                result.reason = f"[근거 확인 필요] {result.reason}"
-
-        # 3. 형식 준수 정책 (COMP) 위반 시
-        elif result.verdict == "FAIL" and "COMP" in policy_id:
-            result.severity = "Warning"
-            result.action = "Retry" # 형식이 틀린 경우 웬만하면 다시 생성 시킴
-
-        # 4. 정상 판정 (PASS)
-        else:
+        if result.verdict == "PASS":
             result.severity = "Safe"
             result.action = "Allow"
-            
+            return result
+
+        category = policy.category or ""
+
+        # [수정 2] category가 명시된 경우 category 우선 판단, 미설정 시 id 프리픽스로 추론.
+        # "CONTENT_001"처럼 id에 여러 의미가 섞인 경우에도 category 기반 분기로 정확히 진입.
+
+        # 1. 고위험 정책 (유해성 등) -> 무조건 차단
+        if "content_safety" in category or ("CONTENT" in policy.id and not category):
+            result.severity = "Critical"
+            result.action = "Block"
+            result.reason = f"[Critical Violation] {result.reason}"
+
+        # 2. 신뢰도 기반 정책 (환각 등) -> 임계치에 따른 차등 처리
+        elif "groundedness" in category or ("HAL" in policy.id and not category):
+            threshold = 0.6
+            if policy.severity_by_confidence:
+                threshold = policy.severity_by_confidence.high_when_confidence_gte or threshold
+
+            if result.confidence < threshold:
+                result.severity = "Critical"
+                result.action = "Block"
+                result.reason = f"[Hallucination Detected] {result.reason}"
+            else:
+                result.severity = "Warning"
+                result.action = "Retry"
+                result.reason = f"[Groundedness Check Failed] {result.reason}"
+
+        # 3. 기타 (형식, 지침 등) -> 정책 설정에 따름
+        else:
+            result.severity = policy.severity.upper() if policy.severity else "Warning"
+            # [수정 3] action.type은 Optional이므로 None인 경우 "Retry"로 안전 처리
+            result.action = (policy.action.type if policy.action and policy.action.type else None) or "Retry"
+
         return result
 
     def judge(
@@ -184,49 +230,66 @@ class JudgeEngine:
         response: str,
         retrieved_context: list[str] | None,
         query: str = "",
-        current_retry: int = 0  # LangGraph에서 전달받은 현재 재시도 횟수
+        current_retry: int = 0
     ) -> JudgeResult:
-        """
-        Main 판정 엔진: LLM 호출 -> 파싱 -> 심각도 판단 -> 최종 액션 결정
-        """
-        # [생략] 1. 프롬프트 조립 로직 (이전과 동일)
+        """정책별 최적화된 프롬프트를 사용하여 응답의 적절성을 판정합니다."""
+        
+        # 1. 프롬프트 구성
         system_tmpl = self._read_prompt("system_judge_v2.txt")
         cot_tmpl = self._read_prompt("cot_reasoning_v2.txt")
-        few_shot_str = self._get_filtered_few_shot(policy.id)
-        rendered_prompt = f"{system_tmpl}\n\n{cot_tmpl}\n\n{few_shot_str}".format(
+        few_shot_str = self._get_filtered_few_shot(policy)
+        
+        context_info = f"Policy Name: {policy.name}\nCategory: {policy.category or 'General'}"
+        
+        # [수정] few_shot_str은 yaml.dump() 결과물이므로 예시 데이터 안에 "{", "}" 문자가
+        # 포함될 수 있음. 이 상태에서 str.format()을 호출하면 해당 중괄호를 플레이스홀더로
+        # 잘못 인식하여 KeyError가 발생. 이스케이프({{ }})로 리터럴 문자로 변환한 뒤 연결.
+        safe_few_shot = few_shot_str.replace("{", "{{").replace("}", "}}")
+        rendered_prompt = f"{system_tmpl}\n\n{context_info}\n\n{cot_tmpl}\n\n{safe_few_shot}".format(
             user_query=query,
             retrieved_context="\n".join(retrieved_context) if retrieved_context else "N/A",
             assistant_response=response,
-            criteria=policy.judge.criteria
+            criteria=policy.judge.criteria or "No specific criteria defined. Apply general safety evaluation.",
         )
 
-        # 2. LLM 호출 및 에러 처리
-        try:
-            if self.llm_client:
+        # 2. LLM 호출
+        raw_llm_output = None
+        if self.llm_client:
+            try:
                 raw_llm_output = self.llm_client.invoke(rendered_prompt).content
-            else:
-                raw_llm_output = None # 테스트용
-        except Exception as e:
-            print(f"Critical LLM Error: {e}")
-            raw_llm_output = None
+            except Exception as e:
+                logger.error(f"LLM invocation error: {e}")
 
-        # 3. 파싱 및 기본 판정값 획득
+        # 3. 결과 분석 및 Fallback
         parsed_result = self._parse_llm_json_result(raw_llm_output)
-        
-        # 4. 판정 실패 시(모델 응답 없음 등) Fallback 적용
+
         if not parsed_result:
-            if policy.id == "GROUND_001":
+            category = policy.category or ""
+            if policy.preconditions and policy.preconditions.requires_retrieved_context:
+                # 컨텍스트 기반 검증이 필요한 경우: 토큰 중복 비율 Fallback 실행
                 parsed_result = self._judge_groundedness_fallback(response, retrieved_context)
+            elif "content_safety" in category or "CONTENT" in policy.id:
+                # [수정] 유해성 정책은 LLM 장애 시 안전 우선(Fail-safe) 처리.
+                # 기존에는 모든 정책이 LLM 장애 시 PASS로 처리되었으나, 유해성 정책에서
+                # LLM이 응답 불능일 때 PASS를 반환하면 실제 유해 콘텐츠가 그대로 통과할 수 있음.
+                parsed_result = JudgeResult(
+                    verdict="FAIL", confidence=1.0,
+                    reason="LLM parsing failed. Content safety policy defaults to FAIL (Fail-safe fallback).",
+                )
             else:
-                parsed_result = JudgeResult(verdict="PASS", confidence=0.5, reason="Default Pass on Failure")
+                # 그 외 정책은 오탐(False Positive) 방지를 위해 PASS로 처리
+                parsed_result = JudgeResult(
+                    verdict="PASS", confidence=0.5,
+                    reason="Pass due to LLM judgment failure (Safe-side fallback).",
+                )
 
-        # 5. [신규] 심각도 기반 최종 액션 결정
-        final_result = self._determine_action_by_severity(parsed_result, policy.id)
+        # 4. 최종 액션 결정
+        final_result = self._determine_action_by_severity(parsed_result, policy)
 
-        # 6. [신규] 재시도 횟수 초과 시 강제 차단 처리
+        # 5. 재시도 초과 시 강제 차단 (안전장치)
         if final_result.action == "Retry" and current_retry >= 3:
             final_result.action = "Block"
-            final_result.reason = "[최종 실패] 3회 재시도 후에도 기준을 만족하지 못했습니다."
             final_result.severity = "Critical"
+            final_result.reason = f"[Max Retries Exceeded] {final_result.reason}"
 
         return final_result
