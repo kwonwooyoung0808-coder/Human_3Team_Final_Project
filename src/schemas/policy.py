@@ -78,6 +78,7 @@ class Policy(BaseModel):
     judge_required: Literal["always", "rule_triggered", "never"]
 
     severity_threshold: Optional[str] = None
+    category: Optional[str] = None # content_safety, groundedness, instruction_compliance 등
 
     preconditions: Optional[PolicyPreconditions] = None
     rules: list[PolicyRule] = Field(default_factory=list)
