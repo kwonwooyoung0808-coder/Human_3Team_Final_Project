@@ -1,9 +1,9 @@
 import { useState } from 'react'
 
+import { evaluatePolicy } from '../api/evaluate'
 import ErrorBanner from '../components/ErrorBanner'
 import JsonBlock from '../components/JsonBlock'
 import StatusBadge from '../components/StatusBadge'
-import { evaluatePolicy } from '../api/evaluate'
 import { useApi } from '../hooks/useApi'
 
 const defaultContext = `{
@@ -15,12 +15,16 @@ const defaultRetrievedContext = `[
   "이 시스템은 2026년에 출시되었습니다."
 ]`
 
+const defaultResponse = `{
+  "summary": "이 시스템은 2026년에 출시되었습니다.",
+  "evidence": "retrieved_context에 동일 문장이 있습니다.",
+  "disclaimer": "추가 검토가 필요할 수 있습니다."
+}`
+
 export default function EvaluatePage() {
-  const [runId, setRunId] = useState('run_web_demo_001')
-  const [input, setInput] = useState('정상 테스트')
-  const [response, setResponse] = useState(
-    '{"answer":"이 시스템은 2026년에 출시되었습니다.","source":"context","confidence":0.93}',
-  )
+  const [runId, setRunId] = useState('run_web_pass_001')
+  const [input, setInput] = useState('제품 출시 시점을 요약해줘.')
+  const [response, setResponse] = useState(defaultResponse)
   const [contextText, setContextText] = useState(defaultContext)
   const [retrievedContextText, setRetrievedContextText] = useState(defaultRetrievedContext)
   const { data, loading, error, execute } = useApi(evaluatePolicy)

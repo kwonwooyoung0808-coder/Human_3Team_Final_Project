@@ -11,14 +11,18 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://safeagent_app:safeagent_password@postgres:5432/safeagent
+      - DATABASE_URL=postgresql://safeagent_app:young0808@postgres:5432/safeagent
       - POLICY_DIR=src/policies
       - PROMPT_DIR=src/prompts
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M
+      - OLLAMA_TEMPERATURE=0.1
     volumes:
       - .:/app
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - postgres
+      - ollama
 
   postgres:
     image: postgres:16
@@ -26,11 +30,20 @@ services:
     environment:
       - POSTGRES_DB=safeagent
       - POSTGRES_USER=safeagent_app
-      - POSTGRES_PASSWORD=safeagent_password
+      - POSTGRES_PASSWORD=young0808
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: safeagent-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   postgres_data:
+  ollama_data:
