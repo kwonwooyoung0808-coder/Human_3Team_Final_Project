@@ -16,20 +16,20 @@ rules:
       categories:
 
         violence_hate:
-          enabled: true 
+          enabled: true
           exact_terms: ["폭력", "violence", "혐오", "hate", "테러", "terror", "차별", "discrimination", "살인", "murder", "죽여", "kill"]
           phrase_patterns: ["폭력을 조장", "혐오 발언", "특정 집단 비하", "(?i)how to kill", "(?i)how to murder"]
-        
+
         sexual_content:
           enabled: true
           exact_terms: ["포르노", "porn", "성착취", "sexual exploitation", "강간", "rape", "미성년자 성"]
           phrase_patterns: ["성행위 방법", "노골적 성적", "(?i)how to have sex"]
-        
+
         suicide_self_harm:
           enabled: true
           exact_terms: ["자살", "suicide", "자해", "self-harm", "목매다", "hang oneself", "거식증 조장"]
           phrase_patterns: ["자살 방법", "자해 하는 법", "자살 추천", "(?i)how to commit suicide"]
-        
+
         criminal_planning:
           enabled: true
           exact_terms: ["방화", "arson", "납치", "kidnap", "사기", "fraud", "scam", "다크웹", "dark web", "마약", "drugs", "불법무기", "illegal weapons"]
