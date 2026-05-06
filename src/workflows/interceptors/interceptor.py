@@ -28,7 +28,11 @@ class _OllamaClient:
         self.base_url = base_url
 
     def invoke(self, prompt: str) -> SimpleNamespace:
-        result = _ollama.generate(
+        # [수정] 기존 모듈 레벨 _ollama.generate()는 base_url을 반영할 수 없음.
+        # ollama.Client(host=...)를 생성하여 호출해야 OLLAMA_URL 설정이 실제로 적용됨.
+        # 로컬 기본 환경에서는 우연히 동작했으나 Docker/원격 환경에서는 연결 실패함.
+        client = _ollama.Client(host=self.base_url)
+        result = client.generate(
             model=self.model,
             prompt=prompt,
             options={"temperature": self.temperature},

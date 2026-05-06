@@ -88,11 +88,19 @@ class JudgeEngine:
         return yaml.dump({"examples": filtered_examples}, allow_unicode=True, sort_keys=False)
 
     def _extract_judged_text(self, response: str) -> str:
-        """JSON 응답인 경우 본문 텍스트만 추출합니다."""
+        """JSON 응답인 경우 본문 텍스트만 추출합니다.
+
+        [수정 이유] 기존에는 "answer" 키만 추출했으나, 현재 응답 포맷이
+        summary / evidence / disclaimer 구조로 변경됨에 따라 "summary" 키를
+        우선 추출하도록 수정. "answer" 키는 하위 호환성을 위해 유지.
+        두 키 모두 없으면 response 전체를 반환하는 기존 동작을 그대로 유지.
+        """
         try:
             parsed = json.loads(response)
-            if isinstance(parsed, dict) and "answer" in parsed:
-                return str(parsed["answer"]).strip()
+            if isinstance(parsed, dict):
+                for key in ("summary", "answer"):
+                    if key in parsed:
+                        return str(parsed[key]).strip()
         except (json.JSONDecodeError, TypeError):
             pass
         return response.strip()
@@ -269,12 +277,18 @@ class JudgeEngine:
                 # 컨텍스트 기반 검증이 필요한 경우: 토큰 중복 비율 Fallback 실행
                 parsed_result = self._judge_groundedness_fallback(response, retrieved_context)
             elif "content_safety" in category or "CONTENT" in policy.id:
-                # [수정] 유해성 정책은 LLM 장애 시 안전 우선(Fail-safe) 처리.
-                # 기존에는 모든 정책이 LLM 장애 시 PASS로 처리되었으나, 유해성 정책에서
+                # 유해성 정책은 LLM 장애 시 안전 우선(Fail-safe) 처리.
                 # LLM이 응답 불능일 때 PASS를 반환하면 실제 유해 콘텐츠가 그대로 통과할 수 있음.
                 parsed_result = JudgeResult(
                     verdict="FAIL", confidence=1.0,
                     reason="LLM parsing failed. Content safety policy defaults to FAIL (Fail-safe fallback).",
+                )
+            elif "instruction_compliance" in category or "CTX" in policy.id:
+                # [수정] CTX_001 등 지침 준수 정책은 parse 실패 시 PASS로 흘러
+                # 실제 위반이 감지되지 않는 문제가 있었음. 안전 우선 원칙에 따라 FAIL로 처리.
+                parsed_result = JudgeResult(
+                    verdict="FAIL", confidence=0.5,
+                    reason="LLM parsing failed. Instruction compliance policy defaults to FAIL (Fail-safe fallback).",
                 )
             else:
                 # 그 외 정책은 오탐(False Positive) 방지를 위해 PASS로 처리
