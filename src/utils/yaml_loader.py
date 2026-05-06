@@ -1,4 +1,5 @@
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Union
 
@@ -51,6 +52,7 @@ def load_policy(path: Union[str, Path]) -> Policy:
     except Exception as exc:
         raise PolicyLoaderError(f"Unexpected error loading '{path_obj.name}': {exc}")
 
+@lru_cache
 def load_policies(policy_dir: Union[str, Path]) -> List[Policy]:
     """
     지정된 디렉토리 내의 모든 *.yaml 정책 파일 로드

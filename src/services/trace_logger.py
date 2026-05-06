@@ -27,7 +27,7 @@ class TraceLogger:
                 status=status,
             )
         )
-        self.db.commit()
+        self.db.flush()
 
     # 우리가 추가했던 마법의 자동 타이머 기능!
     @contextmanager

@@ -24,7 +24,7 @@ class AuditLogger:
                 context_json=context_str,      # <- 문자열로 예쁘게 변환된 데이터 삽입!
             )
         )
-        self.db.commit()
+        self.db.flush()
 
     # 우리가 새로 만들었던 구체적인 로깅 메서드들 (유지)
     def log_policy_evaluation(self, run_id: str, has_violation: bool, context: dict) -> None:

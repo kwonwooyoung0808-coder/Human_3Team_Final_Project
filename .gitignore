@@ -21,3 +21,6 @@ frontend/dist/
 
 # policy
 policymd/
+
+# Claude Code
+.claude/
