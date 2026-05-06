@@ -1,7 +1,7 @@
 id: "CTX_001"
 name: "context_based_compliance"
 version: "2.1.0"
-enabled: true
+enabled: false
 type: "judge"
 judge_required: "always"
 severity: "high"

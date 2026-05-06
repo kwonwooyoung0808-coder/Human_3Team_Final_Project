@@ -153,7 +153,7 @@ class JudgeEngine:
             evidence_text=judged_text[:100],
         )
 
-    def _parse_llm_json_result(self, raw_llm_output: str) -> JudgeResult | None:
+    def _parse_llm_json_result(self, raw_llm_output: str | None) -> JudgeResult | None:
         """LLM 출력에서 JSON을 추출하고 JudgeResult로 파싱합니다."""
         if not raw_llm_output:
             return None
