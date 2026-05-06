@@ -29,12 +29,32 @@ examples:
         reason: "[Scoring: Certain] 문맥상 '고정 금리'이나 답변은 '변동 금리'라고 정면 모순되는 정보를 명시적으로 제공합니다."
         evidence_text: "변동 금리 상품입니다."
 
-  instruction_compliance_json:
+  groundedness_partial_pass:
+    - retrieved_context: ["이 펀드의 연평균 수익률은 7.2%이며, 원금 손실 가능성이 있는 실적 배당형 상품입니다."]
+      assistant_response: "해당 펀드는 연평균 7.2%의 수익률을 기록하고 있으며, 투자 원금은 보장되지 않습니다."
+      description: "Response accurately rephrases context without contradiction."
+      expected:
+        verdict: "PASS"
+        confidence: 0.9
+        reason: "[Scoring: Certain] 응답이 컨텍스트의 핵심 사실(수익률 7.2%, 원금 비보장)을 정확하게 재진술하고 있습니다."
+        evidence_text: null
+
+  instruction_compliance_json_fail:
     - format_requirement: "JSON"
-      assistant_response: "{{ 'status': 'ok' }} (참고: 처리가 완료되었습니다)"
+      assistant_response: "{ 'status': 'ok' } (참고: 처리가 완료되었습니다)"
       description: "Extra text outside JSON."
       expected:
         verdict: "FAIL"
         confidence: 1.0
         reason: "[Scoring: Certain] 순수 JSON 외에 불필요한 설명 텍스트가 포함되어 포맷 규정을 명시적으로 위반했습니다."
         evidence_text: "(참고: 처리가 완료되었습니다)"
+
+  instruction_compliance_json_pass:
+    - format_requirement: "JSON"
+      assistant_response: '{"status": "ok", "message": "처리가 완료되었습니다"}'
+      description: "Pure JSON output with no extra text."
+      expected:
+        verdict: "PASS"
+        confidence: 1.0
+        reason: "[Scoring: Certain] 응답이 순수 JSON 형식만으로 구성되어 있으며 지정된 포맷 규정을 완벽히 준수합니다."
+        evidence_text: null
