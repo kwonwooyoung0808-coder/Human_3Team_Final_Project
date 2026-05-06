@@ -95,7 +95,19 @@ def run_action_stage(state: WorkflowState) -> WorkflowState:
 
 def evaluate_final_response(state: WorkflowState) -> WorkflowState:
     state = run_policy_stage(state)
-    state = run_judge_stage(state)
+    
+    # 정책 단계에서 확실한 차단(BLOCK)이 발생했는지 확인하여 Short-Circuit 여부 결정
+    short_circuit_judge = any(
+        result.triggered and result.recommended_action == "BLOCK" and not result.judge_required
+        for _, result in state.policy_results
+    )
+    
+    if short_circuit_judge:
+        # 이미 차단이 확정되었으므로 비용 및 응답 시간 단축을 위해 LLM Judge 평가 생략
+        state = apply_judge_results(state, {})
+    else:
+        state = run_judge_stage(state)
+        
     state = run_violation_stage(state)
     state = run_action_stage(state)
     return state
