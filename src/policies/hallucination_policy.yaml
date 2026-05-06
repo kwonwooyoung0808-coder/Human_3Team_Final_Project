@@ -6,6 +6,7 @@ type: "judge"
 judge_required: "always"
 severity: "medium"
 priority: 70
+category: "groundedness"
 
 context_scope: ["query", "context", "response"]
 

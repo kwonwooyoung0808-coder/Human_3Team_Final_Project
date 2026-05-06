@@ -6,6 +6,7 @@ type: "judge"
 judge_required: "always"
 severity: "high"
 priority: 90
+category: "instruction_compliance"
 
 context_scope: ["query", "response"]
 

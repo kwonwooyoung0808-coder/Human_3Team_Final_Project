@@ -64,6 +64,9 @@ class PolicyEngine:
                         judge_required = True
                     break
 
+            else:
+                raise ValueError(f"Policy Execution error: Unknown rule condition '{rule.condition}' in policy '{policy.id}'")
+
         if policy.judge_required == "always":
             judge_required = True
         elif policy.judge_required == "never":
