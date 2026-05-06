@@ -8,16 +8,13 @@ from src.engines.judge_engine import JudgeEngine
 from src.engines.policy_engine import PolicyEngine
 from src.engines.violation_engine import ViolationEngine
 from src.schemas.workflow import WorkflowState
-from src.workflows.interceptors.handlers.action_handler import build_action_result
-from src.workflows.interceptors.handlers.judge_handler import collect_judge_results
-from src.workflows.interceptors.handlers.policy_handler import collect_policy_results
+from src.utils.yaml_loader import load_policies
 from src.workflows.state import (
     apply_action,
     apply_judge_results,
     apply_policy_results,
     apply_violations,
 )
-
 
 class _OllamaClient:
     """ollama 패키지 기반 LLM 래퍼 (langchain 없이 LangGraph 워크플로와 통합)"""
@@ -35,63 +32,75 @@ class _OllamaClient:
         )
         return SimpleNamespace(content=result["response"])
 
-
-def run_policy_stage(state: WorkflowState) -> WorkflowState:
+def evaluate_final_response(state: WorkflowState) -> WorkflowState:
     settings = get_settings()
-    policy_results = collect_policy_results(
-        state=state,
-        policy_engine=PolicyEngine(),
-        policy_dir=settings.policy_dir,
-    )
-    return apply_policy_results(state, policy_results)
+    response = state.generated_response or state.final_response or ""
 
-
-def run_judge_stage(state: WorkflowState) -> WorkflowState:
-    settings = get_settings()
+    policy_engine = PolicyEngine()
     llm = _OllamaClient(
         model=settings.ollama_model,
         temperature=settings.ollama_temperature,
         base_url=settings.ollama_url,
     )
-    judge_results = collect_judge_results(
-        state=state,
-        policies=state.policy_results,
-        judge_engine=JudgeEngine(settings.prompt_dir, llm_client=llm),
-    )
-    return apply_judge_results(state, judge_results)
-
-
-def run_violation_stage(state: WorkflowState) -> WorkflowState:
+    judge_engine = JudgeEngine(settings.prompt_dir, llm_client=llm)
     violation_engine = ViolationEngine()
+    action_engine = ActionEngine()
+
+    policies = load_policies(settings.policy_dir)
+
+    policy_results = []
+    judge_results = {}
     violations = []
-    response = state.generated_response or state.final_response or ""
-    for policy, result in state.policy_results:
+    final_action = None
+
+    for policy in policies:
+        evaluation = policy_engine.evaluate_policy(
+            policy=policy,
+            response=response,
+            context=state.context,
+            retrieved_context=state.retrieved_context,
+        )
+        policy_results.append((policy, evaluation))
+
+        judge_res = None
+        if evaluation.judge_required and not evaluation.triggered:
+            judge_res = judge_engine.judge(
+                policy=policy,
+                response=response,
+                retrieved_context=state.retrieved_context,
+            )
+            judge_results[policy.id] = judge_res
+
         violation = violation_engine.from_policy_result(
             run_id=state.run_id,
             policy=policy,
-            result=result,
-            judge_result=state.judge_results.get(policy.id),
+            result=evaluation,
+            judge_result=judge_res,
             response=response,
         )
+
         if violation:
             violations.append(violation)
-    return apply_violations(state, violations)
+            action = action_engine.decide(
+                run_id=state.run_id,
+                response=response,
+                violations=[violation]
+            )
 
+            if action.action_type == "BLOCK":
+                final_action = action
+                break
 
-def run_action_stage(state: WorkflowState) -> WorkflowState:
-    response = state.generated_response or state.final_response or ""
-    action = build_action_result(
-        run_id=state.run_id,
-        response=response,
-        violations=state.violations,
-        action_engine=ActionEngine(),
-    )
-    return apply_action(state, action)
+    if final_action is None:
+        final_action = action_engine.decide(
+            run_id=state.run_id,
+            response=response,
+            violations=violations
+        )
 
+    state = apply_policy_results(state, policy_results)
+    state = apply_judge_results(state, judge_results)
+    state = apply_violations(state, violations)
+    state = apply_action(state, final_action)
 
-def evaluate_final_response(state: WorkflowState) -> WorkflowState:
-    state = run_policy_stage(state)
-    state = run_judge_stage(state)
-    state = run_violation_stage(state)
-    state = run_action_stage(state)
     return state
