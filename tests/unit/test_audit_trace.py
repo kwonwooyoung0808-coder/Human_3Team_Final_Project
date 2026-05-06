@@ -2,17 +2,15 @@ import pytest
 import json
 from datetime import datetime
 from unittest.mock import MagicMock
-
-# 대표님이 작성하신 파일들을 임포트합니다.
 from src.services.audit_logger import AuditLogger
 from src.services.trace_logger import TraceLogger
 from src.schemas.audit import AuditLogCreate
 
-# ==========================================
-# [U-AT-01] test_audit_log_saved_with_run_id
+
+
 # 검증 내용: Audit 저장
 # 기대 결과: DB에 run_id가 연결된 레코드 존재
-# ==========================================
+
 def test_audit_log_saved_with_run_id():
     # 1. 가짜 DB 세션 준비
     mock_db = MagicMock()
@@ -39,11 +37,10 @@ def test_audit_log_saved_with_run_id():
     assert saved_record.run_id == test_run_id  # 기대 결과: run_id가 연결되어 있는가!
 
 
-# ==========================================
-# [U-AT-02] test_trace_summary_build
+
 # 검증 내용: RunTraceSummary 생성
 # 기대 결과: run_id, workflow_name, status, nodes, created_at 포함
-# ==========================================
+
 def test_trace_summary_build():
     # 이 테스트는 API 응답이나 Summary 스키마가 요구사항을 모두 포함하는지 검증합니다.
     # (실제 RunTraceSummary 스키마가 있다면 임포트해서 써도 됩니다)
@@ -68,11 +65,10 @@ def test_trace_summary_build():
     assert type(summary_data["nodes"]) is list
 
 
-# ==========================================
-# [U-AT-03-A] test_execution_trace_on_policy_pass
+
 # 검증 내용: 정책 정상 통과 시 Trace 기록 확인
 # 기대 결과: 노드 실행이 성공적으로 끝났으므로 status="completed" 저장
-# ==========================================
+
 def test_execution_trace_on_policy_pass():
     # 1. 가짜 DB 세션 준비
     mock_db = MagicMock()
@@ -85,7 +81,7 @@ def test_execution_trace_on_policy_pass():
         node_name="Policy_Check_Node",
         node_type="evaluator",
         latency_ms=150.5,
-        status="completed"  # ✅ 정상 상태
+        status="completed"  # 정상 상태
     )
 
     # 3. 검증
@@ -95,11 +91,10 @@ def test_execution_trace_on_policy_pass():
     assert saved_trace.status == "completed"
 
 
-# ==========================================
-# [U-AT-03-B] test_execution_trace_on_policy_violation
+
 # 검증 내용: 정책 위반 또는 에러 발생 시 Trace 기록 확인
 # 기대 결과: 정책 위반이나 노드 중단 시 status="failed"로 저장됨
-# ==========================================
+
 def test_execution_trace_on_policy_violation():
     # 1. 가짜 DB 세션 준비
     mock_db = MagicMock()
@@ -112,7 +107,7 @@ def test_execution_trace_on_policy_violation():
         node_name="Policy_Check_Node",
         node_type="evaluator",
         latency_ms=45.2,
-        status="failed"  # 🚨 위반/실패 상태
+        status="failed"  # 위반/실패 상태
     )
 
     # 3. 검증
@@ -121,11 +116,10 @@ def test_execution_trace_on_policy_violation():
     assert saved_trace.run_id == "trace_violation_001"
     assert saved_trace.status == "failed"
 
-# ==========================================
-# [추가-1] test_audit_log_policy_pass
+
 # 검증 내용: 정책 통과(정상) 시 Audit 로그 저장
 # 기대 결과: has_violation=False일 때 reason이 "No violation detected."로 저장됨
-# ==========================================
+
 def test_audit_log_policy_pass():
     # 1. 가짜 DB 세션 준비
     mock_db = MagicMock()
@@ -134,7 +128,7 @@ def test_audit_log_policy_pass():
     # 2. 정책 통과(정상) 상황 시뮬레이션
     logger.log_policy_evaluation(
         run_id="test_run_pass_001",
-        has_violation=False,  # ✅ 위반 없음 (정상 통과!)
+        has_violation=False,  # 위반 없음 (정상 통과!)
         context={"policy_name": "기본 안전 정책", "score": 0.99}
     )
     
@@ -144,13 +138,13 @@ def test_audit_log_policy_pass():
     
     assert saved_log.run_id == "test_run_pass_001"
     assert saved_log.event_type == "policy_evaluation"
-    # ✨ 핵심 기대 결과: 정상 통과이므로 아래 문구가 정확히 들어가야 함!
+    # 정상 통과이므로 아래 문구가 정확히 들어가야 함
     assert saved_log.reason == "No violation detected." 
 
 
-# ==========================================
-# [추가-2] test_audit_log_policy_violation
-# ==========================================
+
+# test_audit_log_policy_violation
+
 def test_audit_log_policy_violation():
     # 1. 가짜 DB 세션 준비
     mock_db = MagicMock()
@@ -159,7 +153,7 @@ def test_audit_log_policy_violation():
     # 2. 정책 위반(비정상) 상황 시뮬레이션
     logger.log_policy_evaluation(
         run_id="test_run_violation_001",
-        has_violation=True,  # 🚨 정책 위반 발생!!
+        has_violation=True,  # 정책 위반 발생!!
         context={"violation_detail": "주민등록번호 노출 위험 감지"}
     )
     
@@ -171,6 +165,6 @@ def test_audit_log_policy_violation():
     assert saved_log.event_type == "policy_evaluation"
     assert saved_log.reason == "Violation detected."
     
-    # ✨ 수정된 부분: 유니코드로 묶인 JSON 문자열을 풀어서 확인합니다!
+    # 유니코드로 묶인 JSON 문자열을 풀어서 확인
     parsed_context = json.loads(saved_log.context_json)
     assert "주민등록번호" in parsed_context["violation_detail"]
