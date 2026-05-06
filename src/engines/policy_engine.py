@@ -18,9 +18,11 @@ class PolicyEngine:
 
         for rule in policy.rules:
             if rule.condition == "contains_forbidden_words":
+                response_lower = response.lower()
                 for word in rule.parameters.get("forbidden_words", []):
-                    if word.lower() in response.lower():
-                        start = response.lower().find(word.lower())
+                    word_lower = word.lower()
+                    if word_lower in response_lower:
+                        start = response_lower.find(word_lower)
                         evidence_spans.append(
                             {
                                 "text": response[start : start + len(word)],

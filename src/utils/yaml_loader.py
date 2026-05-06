@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -19,6 +20,7 @@ def load_policy(path: Path) -> Policy:
         raise PolicyLoaderError(f"Failed to load policy '{path.name}': {exc}") from exc
 
 
+@lru_cache
 def load_policies(policy_dir: str) -> list[Policy]:
     policies: list[Policy] = []
     base = Path(policy_dir)

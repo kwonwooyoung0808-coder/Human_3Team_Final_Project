@@ -16,9 +16,6 @@ class JudgeEngine:
         return path.read_text(encoding="utf-8")
 
     def judge(self, policy: Policy, response: str, retrieved_context: list[str] | None) -> JudgeResult:
-        _ = self._read_prompt("system_judge_v1.txt")
-        _ = self._read_prompt("cot_reasoning.txt")
-
         if policy.id == "GROUND_001":
             if not retrieved_context:
                 return JudgeResult(

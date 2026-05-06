@@ -21,5 +21,5 @@ class AuditLogger:
                 context_json=json.dumps(event.context_json),
             )
         )
-        self.db.commit()
+        self.db.flush()
 

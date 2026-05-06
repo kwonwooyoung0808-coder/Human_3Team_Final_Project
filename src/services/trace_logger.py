@@ -26,5 +26,5 @@ class TraceLogger:
                 status=status,
             )
         )
-        self.db.commit()
+        self.db.flush()
 

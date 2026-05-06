@@ -41,7 +41,6 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             context_json=json.dumps(request.context),
         )
     )
-    db.commit()
 
     for violation in violations:
         db.add(
@@ -72,8 +71,6 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
                     human_reason=violation.evidence_span.human_reason,
                 )
             )
-    db.commit()
-
     AuditLogger(db).log(
         AuditLogCreate(
             run_id=request.run_id,
@@ -84,6 +81,7 @@ def evaluate(request: EvaluateRequest, db: Session = Depends(get_db)) -> Evaluat
             context_json=request.context,
         )
     )
+    db.commit()
 
     return EvaluateResponse(
         run_id=request.run_id,
