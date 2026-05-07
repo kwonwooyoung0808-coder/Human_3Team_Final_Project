@@ -22,6 +22,10 @@ class Violation(BaseModel):
     reason: str
     source: Literal["rule", "judge"]
     recommended_action: Literal["BLOCK", "LOG"]
+<<<<<<< Updated upstream
+=======
+    fallback_message: str | None = None
+>>>>>>> Stashed changes
     risk_score: float = Field(ge=0.0, le=1.0)
     evidence_span: EvidenceSpan | None = None
     judge_verdict: str | None = None

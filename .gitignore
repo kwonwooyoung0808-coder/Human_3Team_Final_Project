@@ -16,3 +16,11 @@ venv/
 # DB
 *.sqlite
 governance.db
+frontend/node_modules/
+frontend/dist/
+
+# policy
+policymd/
+
+# Claude Code
+.claude/
