@@ -16,6 +16,7 @@ venv/
 # DB
 *.sqlite
 governance.db
+safeagent.db
 frontend/node_modules/
 frontend/dist/
 
