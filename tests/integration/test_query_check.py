@@ -20,16 +20,23 @@ def test_unregistered_agent_returns_422(client):
     assert r.status_code == 422
 
 
-def test_inactive_or_missing_policy_returns_422(client, seeded_agent):
+def test_f1_ignores_request_policy_id_uses_system_policy(client, seeded_agent, mock_ollama):
+    """
+    Stage A 정책 분리: F1 은 항상 SYSTEM_INPUT_POLICY_ID 를 사용한다.
+    request.policy_id 는 무시되므로 잘못된 값을 보내도 200 반환.
+    (시스템 정책의 일관된 보편 안전 필터링 보장)
+    """
     r = client.post(
         "/v1/query/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "안녕하세요",
-            "policy_id": "DOES_NOT_EXIST",
+            "policy_id": "DOES_NOT_EXIST",  # 의도적으로 잘못된 값 — F1 은 무시해야 함
         },
     )
-    assert r.status_code == 422
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] in ("PASSED", "WARNED", "BLOCKED")
 
 
 def test_blocks_forbidden_word_deterministic(client, seeded_agent, mock_ollama):

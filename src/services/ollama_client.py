@@ -6,11 +6,17 @@ from src.core.config import get_settings
 
 
 class OllamaClient:
+    """
+    Governance LLM 클라이언트 (정책 평가, Judge, Self-Consistency 용).
+    SafeAgent 내부 도구로만 사용 — 검사 대상이 아님.
+    Sovereign AI 호출은 SovereignAIClient 를 사용할 것.
+    """
+
     def __init__(self) -> None:
         settings = get_settings()
-        self.base_url = settings.ollama_url.rstrip("/")
-        self.model = settings.ollama_model
-        self.temperature = settings.ollama_temperature
+        self.base_url = settings.governance_llm_url.rstrip("/")
+        self.model = settings.governance_llm_model
+        self.temperature = settings.governance_llm_temperature
 
     async def generate(
         self,
@@ -29,7 +35,7 @@ class OllamaClient:
                 "temperature": temperature if temperature is not None else self.temperature
             },
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(f"{self.base_url}/api/generate", json=payload)
             response.raise_for_status()
             data = response.json()

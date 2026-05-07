@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import uuid
 from functools import lru_cache
@@ -10,7 +9,6 @@ from langgraph.graph import END, StateGraph
 from src.database.connection import SessionLocal
 from src.database.models import QueryAuditLogModel
 from src.schemas.query_risk import QueryRiskState
-from src.services.ollama_client import OllamaClient
 from src.utils.yaml_loader import load_policy
 
 
@@ -190,53 +188,10 @@ def rule_engine_node(state: QueryRiskState) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────
-# 노드 3: LLM 리스크 평가
+# Phase 1 — F1 LLM 제거 (PRD §5.1: P95 ≤ 3s 요구)
+# 사용자 입력 검사는 결정론적 룰만 사용. 의미론적 위험 판단은
+# F2 응답 검증의 LLM Judge 단계에서만 수행 (응답이 위험을 증폭한 경우 차단).
 # ──────────────────────────────────────────────────────────────
-async def llm_risk_agent_node(state: QueryRiskState) -> dict:
-    """
-    Ollama qwen2.5:7b로 쿼리의 맥락적 위험성 평가.
-    평가 기준: Hallucination 유발 / Bias / 정보 유출 / 윤리적 문제
-    실패 → score=0.5 + llm_fallback=True (운영 모니터링용 플래그)
-    """
-    policy = state.get("policy", {})
-
-    system_prompt = (
-        "당신은 AI 쿼리 안전성 평가 전문가입니다.\n"
-        f"적용 정책: {json.dumps(policy, ensure_ascii=False)[:2000]}\n\n"
-        "평가 기준:\n"
-        "1. Hallucination 유발 가능성 (검증 불가 사실 주장 요구)\n"
-        "2. Bias 유발 가능성 (특정 집단 비교/차별 표현)\n"
-        "3. 정보 유출 위험 (내부 정보 추출 시도)\n"
-        "4. 윤리적 문제 (부적절한 행동 요청)\n\n"
-        '반드시 아래 JSON만 반환하라:\n'
-        '{"risk_score": 0.0, "risk_reasons": ["이유1"], "risk_types": ["유형1"]}'
-    )
-    user_msg = f"평가할 쿼리: {state['query']}"
-    if state.get("context"):
-        user_msg += f"\n컨텍스트: {state['context']}"
-
-    try:
-        client = OllamaClient()
-        raw = await client.chat(
-            system_prompt=system_prompt, user_message=user_msg, temperature=0.1
-        )
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not m:
-            raise ValueError("JSON 없음")
-        parsed = json.loads(m.group(0))
-        score = float(parsed.get("risk_score", 0.5))
-        reasons = parsed.get("risk_reasons", []) or []
-        return {
-            "llm_risk_score":   score,
-            "llm_risk_reasons": reasons,
-            "llm_fallback":     False,
-        }
-    except Exception as e:
-        return {
-            "llm_risk_score":   0.5,
-            "llm_risk_reasons": [f"LLM 평가 실패 → 보수적 WARNED 처리: {type(e).__name__}"],
-            "llm_fallback":     True,
-        }
 
 
 # ──────────────────────────────────────────────────────────────
@@ -257,50 +212,40 @@ def _format_rule_violation(v: dict) -> str:
 # ──────────────────────────────────────────────────────────────
 def action_engine_node(state: QueryRiskState) -> dict:
     """
-    BLOCK 조건:
-        - rule_blocked=True (HIGH severity 룰 위반)
-        - 또는 LLM score ≥ 0.7
-    WARN 조건:
-        - MEDIUM rule violation 존재 (예: PII)
-        - 또는 0.4 ≤ score < 0.7
-    PASS:
-        - 그 외
+    Phase 1: F1 LLM 제거 후 결정론적 룰 기반 판정.
 
-    rule_violations 텍스트와 llm_risk_reasons를 합쳐 combined_reasons 생성.
-    이 값이 응답과 audit log에 모두 기록됨.
+    BLOCK : rule_blocked=True (HIGH severity 위반)
+    WARN  : MEDIUM rule violation 존재 (예: PII)
+    PASS  : 위반 없음
+
+    combined_reasons 는 rule_violations 텍스트만 포함 (응답 + audit 공통).
     """
     rule_blocked = state.get("rule_blocked", False)
     rule_violations = state.get("rule_violations", []) or []
-    score = state.get("llm_risk_score", 0.0)
-    llm_reasons = state.get("llm_risk_reasons", []) or []
 
-    # 모든 룰 위반과 LLM 사유를 텍스트로 합침 (응답 + audit 공통)
-    rule_reasons = [_format_rule_violation(v) for v in rule_violations]
-    combined = rule_reasons + llm_reasons
+    combined = [_format_rule_violation(v) for v in rule_violations]
 
     has_medium_rule = any(
         v.get("severity") == "MEDIUM" for v in rule_violations
     )
 
-    if rule_blocked or score >= 0.7:
+    if rule_blocked:
         return {
             "final_status":     "BLOCKED",
-            "final_score":      1.0 if rule_blocked else score,
+            "final_score":      1.0,
             "action_taken":     "BLOCK",
             "combined_reasons": combined,
         }
-    if has_medium_rule or score >= 0.4:
-        # MEDIUM rule만 있고 LLM이 낮은 score를 줬어도 최소 0.5로 끌어올림
-        final_score = max(0.5, score) if has_medium_rule else score
+    if has_medium_rule:
         return {
             "final_status":     "WARNED",
-            "final_score":      final_score,
+            "final_score":      0.5,
             "action_taken":     "LOG",
             "combined_reasons": combined,
         }
     return {
         "final_status":     "PASSED",
-        "final_score":      score,
+        "final_score":      0.0,
         "action_taken":     "PASS",
         "combined_reasons": combined,
     }
@@ -346,7 +291,6 @@ def build_query_risk_graph():
 
     graph.add_node("policy_loader",  policy_loader_node)
     graph.add_node("rule_engine",    rule_engine_node)
-    graph.add_node("llm_risk_agent", llm_risk_agent_node)
     graph.add_node("action_engine",  action_engine_node)
     graph.add_node("audit_logger",   audit_logger_node)
 
@@ -358,13 +302,8 @@ def build_query_risk_graph():
         lambda s: "action_engine" if s.get("rule_blocked") else "rule_engine",
         {"action_engine": "action_engine", "rule_engine": "rule_engine"},
     )
-    # HIGH severity 룰 차단 → LLM 생략 (비용 절감). MEDIUM (PII)은 LLM 거침.
-    graph.add_conditional_edges(
-        "rule_engine",
-        lambda s: "action_engine" if s.get("rule_blocked") else "llm_risk_agent",
-        {"action_engine": "action_engine", "llm_risk_agent": "llm_risk_agent"},
-    )
-    graph.add_edge("llm_risk_agent", "action_engine")
+    # F1 룰 평가 후 곧바로 액션 결정 (LLM 미사용 — Phase 1 성능 최적화)
+    graph.add_edge("rule_engine",    "action_engine")
     graph.add_edge("action_engine",  "audit_logger")
     graph.add_edge("audit_logger",   END)
 

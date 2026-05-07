@@ -21,32 +21,50 @@ from src.utils.yaml_loader import load_policy
 # ──────────────────────────────────────────────────────────────
 def policy_loader_node(state: ComplianceState) -> dict:
     """
-    DB의 policies 테이블에서 policy_id로 yaml_path 조회.
-    is_active=TRUE인 정책만 허용.
-    실패 → rule_rejected=True + rule_violations에 사유 명시 (F2-9 대응).
+    DB 의 policies 테이블에서 policy_id (단일) 또는 policy_ids (리스트) 로 정책 로드.
+    state["policy_ids"] 가 있으면 모두 로드 후 결합 (Stage A 다중 정책).
+    state["policy_id"] 만 있으면 단일 로드 (하위 호환).
+    is_active=TRUE 인 정책만 허용. 실패 → rule_rejected=True (F2-9).
     """
     from src.database.models import PolicyModel
+    from src.utils.policy_combiner import combine_policies
+
+    # 다중 정책 vs 단일 정책 결정
+    raw_ids = state.get("policy_ids") or [state.get("policy_id")]
+    policy_ids = [pid for pid in raw_ids if pid]
+    if not policy_ids:
+        return {
+            "error_message": "policy_id / policy_ids 둘 다 비어있음",
+            "rule_rejected": True,
+            "rule_violations": [{
+                "type": "POLICY_MISSING",
+                "description": "policy_id 가 요청에 없음",
+                "severity": "HIGH",
+            }],
+        }
 
     session = SessionLocal()
     try:
-        row = session.query(PolicyModel).filter(
-            PolicyModel.id == state["policy_id"],
-            PolicyModel.is_active == True,
-        ).first()
+        loaded_policies = []
+        for pid in policy_ids:
+            row = session.query(PolicyModel).filter(
+                PolicyModel.id == pid,
+                PolicyModel.is_active == True,
+            ).first()
+            if not row:
+                return {
+                    "error_message": f"policy_id={pid} 활성 정책 없음",
+                    "rule_rejected": True,
+                    "rule_violations": [{
+                        "type": "POLICY_NOT_FOUND",
+                        "description": f"policy_id={pid} 활성 정책 없음",
+                        "severity": "HIGH",
+                    }],
+                }
+            loaded_policies.append(load_policy(row.yaml_path))
 
-        if not row:
-            return {
-                "error_message": f"policy_id={state['policy_id']} 활성 정책 없음",
-                "rule_rejected": True,
-                "rule_violations": [{
-                    "type": "POLICY_NOT_FOUND",
-                    "description": f"policy_id={state['policy_id']} 활성 정책 없음",
-                    "severity": "HIGH",
-                }],
-            }
-
-        policy = load_policy(row.yaml_path)
-        return {"policy": policy.model_dump()}
+        combined = combine_policies(loaded_policies) if len(loaded_policies) > 1 else loaded_policies[0]
+        return {"policy": combined.model_dump()}
 
     except Exception as e:
         return {
@@ -316,13 +334,16 @@ def audit_logger_node(state: ComplianceState) -> dict:
     PRD 5.2.6: 모든 평가 결과는 근거(violations)와 함께 저장.
     """
     audit_id = str(uuid.uuid4())
+    # 다중 정책 적용 시: 첫 번째 정책 ID (시스템 정책) 를 대표 audit policy_id 로 저장.
+    # 결합된 가상 정책 ID ("COMBINED:...") 는 실제 FK 가 아니므로 사용 불가.
+    audit_policy_id = state.get("policy_id") or (state.get("policy_ids") or [None])[0]
     session = SessionLocal()
     try:
         session.add(ResponseAuditLogModel(
             id=audit_id,
             query_audit_id=state.get("audit_query_id"),
             agent_id=state["agent_id"],
-            policy_id=state["policy_id"],
+            policy_id=audit_policy_id,
             query=state["query"],
             response=state["response"],
             compliance_score=state.get("final_score", 0.0),

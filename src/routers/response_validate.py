@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from src.core.config import get_settings
 from src.core.dependencies import get_db
 from src.database.models import AgentModel, PolicyModel, QueryAuditLogModel
 from src.schemas.compliance import (
@@ -10,6 +11,7 @@ from src.schemas.compliance import (
     ResponseValidateResponse,
     ViolationDetail,
 )
+from src.services.violation_reporter import report_violation
 from src.workflows.compliance_workflow import build_compliance_graph
 
 router = APIRouter(prefix="/v1/response", tags=["response-compliance"])
@@ -22,8 +24,13 @@ async def response_validate(
 ) -> ResponseValidateResponse:
     """
     응답 내규 준수 검증 (Feature 2).
-    그래프 진입 전 FK 대상(agent_id, policy_id, audit_query_id) 존재 여부 사전 검증.
+
+    [정책 결정 — Stage A 분리 전략]
+    F2 는 시스템 입력 정책 + agent 의 부서별 정책을 결합한 가상 정책으로 평가.
+    request.policy_id 가 명시되면 agent.policy_id 보다 우선.
     """
+    settings = get_settings()
+
     agent = db.query(AgentModel).filter(
         AgentModel.id == request.agent_id,
         AgentModel.status == "ACTIVE",
@@ -34,15 +41,26 @@ async def response_validate(
             detail=f"agent_id={request.agent_id} 없음 또는 비활성",
         )
 
-    policy = db.query(PolicyModel).filter(
-        PolicyModel.id == request.policy_id,
-        PolicyModel.is_active == True,
-    ).first()
-    if not policy:
-        raise HTTPException(
-            status_code=422,
-            detail=f"policy_id={request.policy_id} 없음 또는 미활성",
-        )
+    # 부서별 정책 결정: request 우선, 없으면 agent 의 기본값
+    department_policy_id = request.policy_id or agent.policy_id
+    system_policy_id = settings.system_input_policy_id
+
+    # 결합할 정책 ID 리스트 구성 (시스템 정책 항상 포함, 중복 제거)
+    policy_ids: list[str] = [system_policy_id]
+    if department_policy_id and department_policy_id != system_policy_id:
+        policy_ids.append(department_policy_id)
+
+    # FK 사전 검증 — 모든 정책이 활성 상태여야 함
+    for pid in policy_ids:
+        exists = db.query(PolicyModel).filter(
+            PolicyModel.id == pid,
+            PolicyModel.is_active == True,
+        ).first()
+        if not exists:
+            raise HTTPException(
+                status_code=422,
+                detail=f"policy_id={pid} 없음 또는 미활성 (결합 대상: {policy_ids})",
+            )
 
     # Feature 1 연결 ID 유효성 검증 (선택적)
     if request.audit_query_id:
@@ -70,7 +88,7 @@ async def response_validate(
         "agent_id":       request.agent_id,
         "query":          request.query,
         "response":       request.response,
-        "policy_id":      request.policy_id,
+        "policy_ids":     policy_ids,  # Stage A: 시스템 + 부서 결합
         "audit_query_id": request.audit_query_id,
     })
 
@@ -81,6 +99,17 @@ async def response_validate(
             violations.append(ViolationDetail(**v))
         except Exception:
             pass
+
+    if final.get("final_status") == "REJECTED":
+        report_violation(
+            stage="F2_RESPONSE",
+            agent_id=request.agent_id,
+            query_audit_id=request.audit_query_id,
+            response_audit_id=final.get("audit_id"),
+            original_query=request.query,
+            original_response=request.response,
+            violations=raw_violations,
+        )
 
     return ResponseValidateResponse(
         status=final.get("final_status", "APPROVED"),

@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session
 from src.core.dependencies import get_db
 from src.database.models import AgentModel, PolicyModel
 from src.schemas.compliance import ViolationDetail
+from src.core.config import get_settings
 from src.schemas.proxy import ProxyChatRequest, ProxyChatResponse
-from src.services.ollama_client import OllamaClient
+from src.services.safe_response_generator import generate_safe_response
+from src.services.sovereign_ai_client import SovereignAIClient
+from src.services.violation_reporter import report_violation
 from src.workflows.compliance_workflow import build_compliance_graph
 from src.workflows.query_risk_workflow import build_query_risk_graph
 
@@ -15,18 +18,13 @@ router = APIRouter(prefix="/v1/proxy", tags=["proxy"])
 
 
 # ──────────────────────────────────────────────────────────────
-# 데모/테스트용 Sovereign AI 호출 — 실제 운영 시 고객사 LLM URL로 교체
+# Sovereign AI 호출 — SOVEREIGN_AI_* 환경변수로 분리 (운영 시 회사 LLM URL 로 교체)
+# Agent 별 LLM 매핑은 향후 AgentModel 컬럼으로 확장 예정
 # ──────────────────────────────────────────────────────────────
 async def _call_sovereign_ai(query: str, context: str | None = None) -> str:
-    """
-    데모용: 같은 Ollama 인스턴스를 Sovereign AI로 재사용.
-    실제 운영 시 이 함수를 고객사 Sovereign AI 호출로 교체.
-    """
-    client = OllamaClient()
-    prompt = f"질문: {query}"
-    if context:
-        prompt = f"컨텍스트: {context}\n\n{prompt}"
-    return await client.generate(prompt)
+    """SOVEREIGN_AI_URL 환경변수에 설정된 회사 자체 AI 호출."""
+    client = SovereignAIClient()
+    return await client.generate(query, context)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -48,6 +46,8 @@ async def proxy_chat(
     개별 단계 추적이 필요하면 query_audit_id / response_audit_id로 감사 로그 조회.
     """
     # ── 사전 검증 (FK 무결성) ──────────────────────────────────
+    settings = get_settings()
+
     agent = db.query(AgentModel).filter(
         AgentModel.id == request.agent_id,
         AgentModel.status == "ACTIVE",
@@ -58,33 +58,59 @@ async def proxy_chat(
             detail=f"agent_id={request.agent_id} 없음 또는 비활성",
         )
 
-    policy = db.query(PolicyModel).filter(
-        PolicyModel.id == request.policy_id,
-        PolicyModel.is_active == True,
-    ).first()
-    if not policy:
-        raise HTTPException(
-            status_code=422,
-            detail=f"policy_id={request.policy_id} 없음 또는 미활성",
-        )
+    # Stage A 정책 분리 전략
+    # F1: 시스템 입력 정책만 사용 (보편 안전 필터)
+    # F2: 시스템 정책 + agent/request 의 부서별 정책 결합
+    system_policy_id = settings.system_input_policy_id
+    department_policy_id = request.policy_id or agent.policy_id
 
-    # ── ① Feature 1: 질의 위험 감지 ────────────────────────────
+    f2_policy_ids: list[str] = [system_policy_id]
+    if department_policy_id and department_policy_id != system_policy_id:
+        f2_policy_ids.append(department_policy_id)
+
+    # 모든 결합 정책이 활성 상태여야 함
+    for pid in f2_policy_ids:
+        exists = db.query(PolicyModel).filter(
+            PolicyModel.id == pid,
+            PolicyModel.is_active == True,
+        ).first()
+        if not exists:
+            raise HTTPException(
+                status_code=422,
+                detail=f"policy_id={pid} 없음 또는 미활성 (결합 대상: {f2_policy_ids})",
+            )
+
+    # ── ① Feature 1: 질의 위험 감지 (시스템 정책 고정) ────────
     query_graph = build_query_risk_graph()
     q_final: dict = await query_graph.ainvoke({
         "agent_id":  request.agent_id,
         "query":     request.query,
         "context":   request.context,
-        "policy_id": request.policy_id,
+        "policy_id": system_policy_id,
     })
 
     query_audit_id = q_final.get("audit_id", "")
     risk_score = q_final.get("final_score", 0.0)
-    risk_reasons = q_final.get("llm_risk_reasons", [])
+    risk_reasons = q_final.get("combined_reasons", [])
 
     if q_final.get("final_status") == "BLOCKED":
+        safe_msg = generate_safe_response(
+            stage="BLOCKED_BY_QUERY",
+            violations=q_final.get("rule_violations") or [],
+            risk_reasons=risk_reasons,
+        )
+        report_violation(
+            stage="F1_QUERY",
+            agent_id=request.agent_id,
+            query_audit_id=query_audit_id,
+            original_query=request.query,
+            violations=q_final.get("rule_violations") or [],
+            risk_reasons=risk_reasons,
+        )
         return ProxyChatResponse(
             status="BLOCKED_BY_QUERY",
-            final_response=None,
+            final_response=safe_msg,
+            safe_response=safe_msg,
             query_audit_id=query_audit_id,
             risk_score=risk_score,
             risk_reasons=risk_reasons,
@@ -102,12 +128,13 @@ async def proxy_chat(
         )
 
     # ── ③ Feature 2: 응답 내규 검증 (audit_query_id 자동 연결) ──
+    # ── ③ Feature 2: 응답 검증 (시스템 + 부서 정책 결합) ───────
     compliance_graph = build_compliance_graph()
     r_final: dict = await compliance_graph.ainvoke({
         "agent_id":       request.agent_id,
         "query":          request.query,
         "response":       ai_response,
-        "policy_id":      request.policy_id,
+        "policy_ids":     f2_policy_ids,  # Stage A: 시스템 + 부서 결합
         "audit_query_id": query_audit_id,
     })
 
@@ -124,9 +151,25 @@ async def proxy_chat(
 
     final_status = r_final.get("final_status", "APPROVED")
     if final_status == "REJECTED":
+        safe_msg = generate_safe_response(
+            stage="REJECTED_BY_RESPONSE",
+            violations=raw_violations,
+            risk_reasons=risk_reasons,
+        )
+        report_violation(
+            stage="F2_RESPONSE",
+            agent_id=request.agent_id,
+            query_audit_id=query_audit_id,
+            response_audit_id=response_audit_id,
+            original_query=request.query,
+            original_response=ai_response,
+            violations=raw_violations,
+            risk_reasons=risk_reasons,
+        )
         return ProxyChatResponse(
             status="REJECTED_BY_RESPONSE",
-            final_response=None,
+            final_response=safe_msg,
+            safe_response=safe_msg,
             query_audit_id=query_audit_id,
             response_audit_id=response_audit_id,
             risk_score=risk_score,

@@ -1,7 +1,7 @@
 id: "COMP_001"
 name: "instruction_compliance"
 version: "1.2.0"
-enabled: true
+enabled: false  # RAG 구조화 응답 전용 (evaluate.py 레거시). Sovereign AI 자연어 응답에 미적용
 
 # 순수 룰 기반 검사와 LLM 기반 판정을 혼합하여 사용하기 위해 하이브리드 타입 적용
 type: "hybrid"

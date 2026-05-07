@@ -19,3 +19,9 @@ governance.db
 
 # policy
 policymd/
+
+# Policy Compiler 런타임 산출물 (변환 실패 .docx 보존 위치)
+src/policies/failed_uploads/
+
+# IDE
+.vscode/

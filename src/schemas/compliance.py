@@ -15,7 +15,8 @@ class ResponseValidateRequest(BaseModel):
     agent_id: str
     query: str
     response: str
-    policy_id: str
+    # 생략 시 agent 의 등록된 기본 policy_id 사용. 둘 다 없으면 422.
+    policy_id: str | None = None
     audit_query_id: str | None = None
 
 
@@ -32,7 +33,8 @@ class ComplianceState(TypedDict, total=False):
     agent_id: str
     query: str
     response: str
-    policy_id: str
+    policy_id: str           # 단일 정책 (하위 호환)
+    policy_ids: list[str]    # 다중 정책 (Stage A: 시스템 + 부서별 결합)
     audit_query_id: str | None
 
     policy: dict[str, Any]

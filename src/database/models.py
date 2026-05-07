@@ -148,6 +148,64 @@ class ResponseAuditLogModel(Base):
     )
 
 
+class InquiryModel(Base):
+    __tablename__ = "inquiries"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    agent_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("agents.id"), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    inquiry_type: Mapped[str] = mapped_column(String(50))  # BLOCK_APPEAL / POLICY_QUESTION / OTHER
+    audit_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING / RESOLVED
+    admin_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_inquiry_user_created", "user_id", "created_at"),
+    )
+
+
+class ViolationReportModel(Base):
+    """PRD §7 Policy Violation Reporter — 차단/거부된 사례를 자동 리포트.
+
+    F1 BLOCKED 또는 F2 REJECTED 발생 시 자동 INSERT.
+    관리자는 GET /v1/violation-reports 로 조회, PUT 으로 status 갱신.
+    audit log 와 별도 테이블 — 관리자가 검토/조치할 워크큐 역할.
+    """
+    __tablename__ = "violation_reports"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    agent_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("agents.id"), nullable=True, index=True
+    )
+    # 어느 단계에서 발생했는지: F1_QUERY (질의 차단) | F2_RESPONSE (응답 거부)
+    stage: Mapped[str] = mapped_column(String(20), index=True)
+    query_audit_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("query_audit_logs.id"), nullable=True, index=True
+    )
+    response_audit_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("response_audit_logs.id"), nullable=True, index=True
+    )
+    severity: Mapped[str] = mapped_column(String(20), default="HIGH")
+    primary_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    summary: Mapped[str] = mapped_column(Text)
+    original_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    violations: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    risk_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # NEW(접수) / REVIEWING(검토중) / RESOLVED(조치완료) / DISMISSED(반려)
+    status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
+    admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_violation_report_status_created", "status", "created_at"),
+    )
+
+
 class PolicyConversionLogModel(Base):
     __tablename__ = "policy_conversion_logs"
 
