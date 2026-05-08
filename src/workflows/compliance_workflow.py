@@ -243,10 +243,12 @@ async def llm_compliance_agent_node(state: ComplianceState) -> dict:
         return {"llm_compliance_score": score, "llm_violations": violations}
 
     except Exception as e:
+        # 일부 예외는 str(e) 가 비어있어 진단 불가 — type 도 함께 노출
+        detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         return {
             "llm_compliance_score": 0.5,
             "llm_violations": [
-                {"type": "LLM_ERROR", "description": str(e), "severity": "MEDIUM"}
+                {"type": "LLM_ERROR", "description": detail, "severity": "MEDIUM"}
             ],
         }
 
@@ -341,6 +343,7 @@ def audit_logger_node(state: ComplianceState) -> dict:
     try:
         session.add(ResponseAuditLogModel(
             id=audit_id,
+            trace_id=state.get("trace_id"),
             query_audit_id=state.get("audit_query_id"),
             agent_id=state["agent_id"],
             policy_id=audit_policy_id,

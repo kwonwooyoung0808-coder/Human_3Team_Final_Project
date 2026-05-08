@@ -20,6 +20,7 @@ class QueryCheckResponse(BaseModel):
     risk_reasons: list[str] = Field(default_factory=list)
     action_taken: Literal["BLOCK", "LOG", "PASS"]
     audit_id: str
+    trace_id: str
 
 
 class QueryRiskState(TypedDict, total=False):
@@ -29,6 +30,7 @@ class QueryRiskState(TypedDict, total=False):
     query: str
     context: str | None
     policy_id: str
+    trace_id: str
 
     policy: dict[str, Any]
     rule_violations: list[dict[str, Any]]

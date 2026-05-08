@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from src.core.dependencies import get_db
+from src.core.dependencies import get_db, get_trace_id
 from src.database.models import AgentModel, PolicyModel
 from src.schemas.compliance import ViolationDetail
 from src.core.config import get_settings
@@ -34,6 +34,7 @@ async def _call_sovereign_ai(query: str, context: str | None = None) -> str:
 async def proxy_chat(
     request: ProxyChatRequest,
     db: Session = Depends(get_db),
+    trace_id: str = Depends(get_trace_id),
 ) -> ProxyChatResponse:
     """
     PRD 외 편의 엔드포인트. 다음 3단계를 자동으로 묶음:
@@ -87,6 +88,7 @@ async def proxy_chat(
         "query":     request.query,
         "context":   request.context,
         "policy_id": system_policy_id,
+        "trace_id":  trace_id,
     })
 
     query_audit_id = q_final.get("audit_id", "")
@@ -101,6 +103,7 @@ async def proxy_chat(
         )
         report_violation(
             stage="F1_QUERY",
+            trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=query_audit_id,
             original_query=request.query,
@@ -114,6 +117,7 @@ async def proxy_chat(
             query_audit_id=query_audit_id,
             risk_score=risk_score,
             risk_reasons=risk_reasons,
+            trace_id=trace_id,
         )
 
     # ── ② Sovereign AI 호출 ────────────────────────────────────
@@ -125,6 +129,7 @@ async def proxy_chat(
             query_audit_id=query_audit_id,
             risk_score=risk_score,
             error_message=f"Sovereign AI 호출 실패: {e}",
+            trace_id=trace_id,
         )
 
     # ── ③ Feature 2: 응답 내규 검증 (audit_query_id 자동 연결) ──
@@ -136,6 +141,7 @@ async def proxy_chat(
         "response":       ai_response,
         "policy_ids":     f2_policy_ids,  # Stage A: 시스템 + 부서 결합
         "audit_query_id": query_audit_id,
+        "trace_id":       trace_id,
     })
 
     response_audit_id = r_final.get("audit_id", "")
@@ -158,6 +164,7 @@ async def proxy_chat(
         )
         report_violation(
             stage="F2_RESPONSE",
+            trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=query_audit_id,
             response_audit_id=response_audit_id,
@@ -176,6 +183,7 @@ async def proxy_chat(
             compliance_score=compliance_score,
             violations=violations,
             risk_reasons=risk_reasons,
+            trace_id=trace_id,
         )
 
     if final_status == "FLAGGED":
@@ -188,6 +196,7 @@ async def proxy_chat(
             compliance_score=compliance_score,
             violations=violations,
             risk_reasons=risk_reasons,
+            trace_id=trace_id,
         )
 
     return ProxyChatResponse(
@@ -199,4 +208,5 @@ async def proxy_chat(
         compliance_score=compliance_score,
         violations=violations,
         risk_reasons=risk_reasons,
+        trace_id=trace_id,
     )

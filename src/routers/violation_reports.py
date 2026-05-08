@@ -18,6 +18,7 @@ ReportStatus = Literal["NEW", "REVIEWING", "RESOLVED", "DISMISSED"]
 
 class ViolationReportItem(BaseModel):
     id: str
+    trace_id: str | None
     agent_id: str | None
     stage: str
     query_audit_id: str | None
@@ -45,6 +46,28 @@ class StatusUpdateRequest(BaseModel):
     admin_note: str | None = None
 
 
+def _to_item(r: ViolationReportModel) -> ViolationReportItem:
+    return ViolationReportItem(
+        id=r.id,
+        trace_id=r.trace_id,
+        agent_id=r.agent_id,
+        stage=r.stage,
+        query_audit_id=r.query_audit_id,
+        response_audit_id=r.response_audit_id,
+        severity=r.severity,
+        primary_category=r.primary_category,
+        summary=r.summary,
+        original_query=r.original_query,
+        original_response=r.original_response,
+        violations=r.violations or [],
+        risk_reasons=r.risk_reasons or [],
+        status=r.status,
+        admin_note=r.admin_note,
+        created_at=r.created_at,
+        resolved_at=r.resolved_at,
+    )
+
+
 @router.get("", response_model=ViolationReportListResponse)
 def list_reports(
     status: ReportStatus | None = Query(default=None),
@@ -66,27 +89,7 @@ def list_reports(
         .limit(limit)
         .all()
     )
-    items = [
-        ViolationReportItem(
-            id=r.id,
-            agent_id=r.agent_id,
-            stage=r.stage,
-            query_audit_id=r.query_audit_id,
-            response_audit_id=r.response_audit_id,
-            severity=r.severity,
-            primary_category=r.primary_category,
-            summary=r.summary,
-            original_query=r.original_query,
-            original_response=r.original_response,
-            violations=r.violations or [],
-            risk_reasons=r.risk_reasons or [],
-            status=r.status,
-            admin_note=r.admin_note,
-            created_at=r.created_at,
-            resolved_at=r.resolved_at,
-        )
-        for r in rows
-    ]
+    items = [_to_item(r) for r in rows]
     return ViolationReportListResponse(items=items, total=total)
 
 
@@ -95,24 +98,7 @@ def get_report(report_id: str, db: Session = Depends(get_db)) -> ViolationReport
     r = db.query(ViolationReportModel).filter(ViolationReportModel.id == report_id).first()
     if not r:
         raise HTTPException(status_code=404, detail=f"report_id={report_id} 없음")
-    return ViolationReportItem(
-        id=r.id,
-        agent_id=r.agent_id,
-        stage=r.stage,
-        query_audit_id=r.query_audit_id,
-        response_audit_id=r.response_audit_id,
-        severity=r.severity,
-        primary_category=r.primary_category,
-        summary=r.summary,
-        original_query=r.original_query,
-        original_response=r.original_response,
-        violations=r.violations or [],
-        risk_reasons=r.risk_reasons or [],
-        status=r.status,
-        admin_note=r.admin_note,
-        created_at=r.created_at,
-        resolved_at=r.resolved_at,
-    )
+    return _to_item(r)
 
 
 @router.put("/{report_id}/status", response_model=ViolationReportItem)
@@ -135,21 +121,4 @@ def update_status(
 
     db.commit()
     db.refresh(r)
-    return ViolationReportItem(
-        id=r.id,
-        agent_id=r.agent_id,
-        stage=r.stage,
-        query_audit_id=r.query_audit_id,
-        response_audit_id=r.response_audit_id,
-        severity=r.severity,
-        primary_category=r.primary_category,
-        summary=r.summary,
-        original_query=r.original_query,
-        original_response=r.original_response,
-        violations=r.violations or [],
-        risk_reasons=r.risk_reasons or [],
-        status=r.status,
-        admin_note=r.admin_note,
-        created_at=r.created_at,
-        resolved_at=r.resolved_at,
-    )
+    return _to_item(r)

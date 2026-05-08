@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.core.config import get_settings
-from src.core.dependencies import get_db
+from src.core.dependencies import get_db, get_trace_id
 from src.database.models import AgentModel, PolicyModel, QueryAuditLogModel
 from src.schemas.compliance import (
     ResponseValidateRequest,
@@ -21,6 +21,7 @@ router = APIRouter(prefix="/v1/response", tags=["response-compliance"])
 async def response_validate(
     request: ResponseValidateRequest,
     db: Session = Depends(get_db),
+    trace_id: str = Depends(get_trace_id),
 ) -> ResponseValidateResponse:
     """
     응답 내규 준수 검증 (Feature 2).
@@ -90,6 +91,7 @@ async def response_validate(
         "response":       request.response,
         "policy_ids":     policy_ids,  # Stage A: 시스템 + 부서 결합
         "audit_query_id": request.audit_query_id,
+        "trace_id":       trace_id,
     })
 
     raw_violations = final.get("all_violations", [])
@@ -103,6 +105,7 @@ async def response_validate(
     if final.get("final_status") == "REJECTED":
         report_violation(
             stage="F2_RESPONSE",
+            trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=request.audit_query_id,
             response_audit_id=final.get("audit_id"),
@@ -116,4 +119,5 @@ async def response_validate(
         compliance_score=final.get("final_score", 1.0),
         violations=violations,
         audit_id=final.get("audit_id", ""),
+        trace_id=trace_id,
     )

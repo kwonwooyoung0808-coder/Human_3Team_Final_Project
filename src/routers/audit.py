@@ -49,6 +49,7 @@ def get_query_audit(audit_id: str, db: Session = Depends(get_db)) -> dict:
 
     return {
         "audit_id":     row.id,
+        "trace_id":     row.trace_id,
         "agent_id":     row.agent_id,
         "policy_id":    row.policy_id,
         "query":        row.query,
@@ -70,6 +71,7 @@ def get_response_audit(audit_id: str, db: Session = Depends(get_db)) -> dict:
 
     return {
         "audit_id":         row.id,
+        "trace_id":         row.trace_id,
         "query_audit_id":   row.query_audit_id,
         "agent_id":         row.agent_id,
         "policy_id":        row.policy_id,

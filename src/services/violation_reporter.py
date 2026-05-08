@@ -51,6 +51,7 @@ def report_violation(
     *,
     stage: str,
     agent_id: str | None,
+    trace_id: str | None = None,
     query_audit_id: str | None = None,
     response_audit_id: str | None = None,
     original_query: str | None = None,
@@ -64,6 +65,7 @@ def report_violation(
     try:
         session.add(ViolationReportModel(
             id=report_id,
+            trace_id=trace_id,
             agent_id=agent_id,
             stage=stage,
             query_audit_id=query_audit_id,

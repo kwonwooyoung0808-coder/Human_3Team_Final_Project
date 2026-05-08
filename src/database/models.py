@@ -111,6 +111,8 @@ class QueryAuditLogModel(Base):
     __tablename__ = "query_audit_logs"
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    # PRD §6: 한 사용자 요청을 F1→F2→violation_report 까지 추적할 수 있는 체인 ID
+    trace_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     agent_id: Mapped[str] = mapped_column(String(80), ForeignKey("agents.id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), ForeignKey("policies.id"), index=True)
     query: Mapped[str] = mapped_column(Text)
@@ -131,6 +133,7 @@ class ResponseAuditLogModel(Base):
     __tablename__ = "response_audit_logs"
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     query_audit_id: Mapped[str | None] = mapped_column(
         String(80), ForeignKey("query_audit_logs.id"), nullable=True, index=True
     )
@@ -177,6 +180,7 @@ class ViolationReportModel(Base):
     __tablename__ = "violation_reports"
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     agent_id: Mapped[str | None] = mapped_column(
         String(80), ForeignKey("agents.id"), nullable=True, index=True
     )

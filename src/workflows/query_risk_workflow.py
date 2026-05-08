@@ -264,6 +264,7 @@ def audit_logger_node(state: QueryRiskState) -> dict:
     try:
         session.add(QueryAuditLogModel(
             id=audit_id,
+            trace_id=state.get("trace_id"),
             agent_id=state["agent_id"],
             policy_id=state["policy_id"],
             query=state["query"],

@@ -25,6 +25,7 @@ class ResponseValidateResponse(BaseModel):
     compliance_score: float = 1.0
     violations: list[ViolationDetail] = Field(default_factory=list)
     audit_id: str
+    trace_id: str
 
 
 class ComplianceState(TypedDict, total=False):
@@ -36,6 +37,7 @@ class ComplianceState(TypedDict, total=False):
     policy_id: str           # 단일 정책 (하위 호환)
     policy_ids: list[str]    # 다중 정책 (Stage A: 시스템 + 부서별 결합)
     audit_query_id: str | None
+    trace_id: str            # PRD §6 추적 체인
 
     policy: dict[str, Any]
     rule_violations: list[dict[str, Any]]

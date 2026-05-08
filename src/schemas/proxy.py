@@ -47,3 +47,4 @@ class ProxyChatResponse(BaseModel):
     violations: list[ViolationDetail] = Field(default_factory=list)
     risk_reasons: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    trace_id: str

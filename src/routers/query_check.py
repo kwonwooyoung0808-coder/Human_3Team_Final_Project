@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.core.config import get_settings
-from src.core.dependencies import get_db
+from src.core.dependencies import get_db, get_trace_id
 from src.database.models import AgentModel, PolicyModel
 from src.schemas.query_risk import QueryCheckRequest, QueryCheckResponse
 from src.services.violation_reporter import report_violation
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/v1/query", tags=["query-risk"])
 async def query_check(
     request: QueryCheckRequest,
     db: Session = Depends(get_db),
+    trace_id: str = Depends(get_trace_id),
 ) -> QueryCheckResponse:
     """
     쿼리 위험성 평가 (Feature 1).
@@ -58,11 +59,13 @@ async def query_check(
         "query":     request.query,
         "context":   request.context,
         "policy_id": system_policy_id,
+        "trace_id":  trace_id,
     })
 
     if final.get("final_status") == "BLOCKED":
         report_violation(
             stage="F1_QUERY",
+            trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=final.get("audit_id"),
             original_query=request.query,
@@ -77,4 +80,5 @@ async def query_check(
         risk_reasons=final.get("combined_reasons", []),
         action_taken=final.get("action_taken", "PASS"),
         audit_id=final.get("audit_id", ""),
+        trace_id=trace_id,
     )
