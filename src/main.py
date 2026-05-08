@@ -11,6 +11,7 @@ from src.routers import (
     evaluate,
     inquiry,
     policy_convert,
+    policy_groups,
     proxy,
     query_check,
     response_validate,
@@ -55,3 +56,4 @@ app.include_router(agents.router)
 app.include_router(proxy.router)
 app.include_router(inquiry.router)
 app.include_router(violation_reports.router)
+app.include_router(policy_groups.router)

@@ -12,6 +12,7 @@ from src.schemas.compliance import (
     ViolationDetail,
 )
 from src.services.violation_reporter import report_violation
+from src.utils.agent_policies import resolve_agent_policy_ids
 from src.workflows.compliance_workflow import build_compliance_graph
 
 router = APIRouter(prefix="/v1/response", tags=["response-compliance"])
@@ -42,14 +43,15 @@ async def response_validate(
             detail=f"agent_id={request.agent_id} 없음 또는 비활성",
         )
 
-    # 부서별 정책 결정: request 우선, 없으면 agent 의 기본값
-    department_policy_id = request.policy_id or agent.policy_id
     system_policy_id = settings.system_input_policy_id
 
-    # 결합할 정책 ID 리스트 구성 (시스템 정책 항상 포함, 중복 제거)
-    policy_ids: list[str] = [system_policy_id]
-    if department_policy_id and department_policy_id != system_policy_id:
-        policy_ids.append(department_policy_id)
+    # Phase 2-C: 시스템 + agent.policy_id (legacy) + agent 가 속한 그룹의 모든 멤버 정책
+    policy_ids = resolve_agent_policy_ids(
+        db,
+        agent=agent,
+        system_policy_id=system_policy_id,
+        request_policy_id=request.policy_id,
+    )
 
     # FK 사전 검증 — 모든 정책이 활성 상태여야 함
     for pid in policy_ids:

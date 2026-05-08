@@ -3,12 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from src.core.dependencies import get_db
+from pydantic import BaseModel
+
 from src.database.models import (
     AgentModel,
+    AgentPolicyGroupMappingModel,
+    PolicyGroupModel,
     PolicyModel,
     QueryAuditLogModel,
     ResponseAuditLogModel,
@@ -188,3 +192,108 @@ def get_agent_audit(
             for r in responses
         ],
     }
+
+
+# ──────────────────────────────────────────────────────────────
+# Phase 2-C: Agent ↔ Policy Group 매핑
+# ──────────────────────────────────────────────────────────────
+
+
+class AgentGroupAssign(BaseModel):
+    group_id: str
+
+
+class AgentGroupListItem(BaseModel):
+    group_id: str
+    name: str
+    policy_ids: list[str]
+
+
+def _ensure_agent(db: Session, agent_id: str) -> AgentModel:
+    agent = db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"agent_id={agent_id} 없음")
+    return agent
+
+
+def _ensure_group(db: Session, group_id: str) -> PolicyGroupModel:
+    group = db.query(PolicyGroupModel).filter(PolicyGroupModel.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail=f"group_id={group_id} 없음")
+    return group
+
+
+@router.post("/{agent_id}/policy-groups", status_code=201)
+def assign_group(
+    agent_id: str,
+    payload: AgentGroupAssign,
+    db: Session = Depends(get_db),
+) -> dict:
+    """에이전트에 정책 그룹 할당. 이미 매핑되어 있으면 409."""
+    _ensure_agent(db, agent_id)
+    _ensure_group(db, payload.group_id)
+
+    existing = db.query(AgentPolicyGroupMappingModel).filter(
+        AgentPolicyGroupMappingModel.agent_id == agent_id,
+        AgentPolicyGroupMappingModel.group_id == payload.group_id,
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"agent_id={agent_id} 는 이미 group_id={payload.group_id} 에 속해있음",
+        )
+
+    db.add(AgentPolicyGroupMappingModel(agent_id=agent_id, group_id=payload.group_id))
+    db.commit()
+    return {"agent_id": agent_id, "group_id": payload.group_id, "assigned": True}
+
+
+@router.delete("/{agent_id}/policy-groups/{group_id}", status_code=204, response_class=Response)
+def unassign_group(
+    agent_id: str,
+    group_id: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    row = db.query(AgentPolicyGroupMappingModel).filter(
+        AgentPolicyGroupMappingModel.agent_id == agent_id,
+        AgentPolicyGroupMappingModel.group_id == group_id,
+    ).first()
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"매핑 없음 (agent_id={agent_id}, group_id={group_id})",
+        )
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/{agent_id}/policy-groups", response_model=list[AgentGroupListItem])
+def list_agent_groups(
+    agent_id: str,
+    db: Session = Depends(get_db),
+) -> list[AgentGroupListItem]:
+    _ensure_agent(db, agent_id)
+
+    from src.database.models import PolicyGroupMemberModel
+
+    rows = (
+        db.query(PolicyGroupModel)
+        .join(
+            AgentPolicyGroupMappingModel,
+            AgentPolicyGroupMappingModel.group_id == PolicyGroupModel.id,
+        )
+        .filter(AgentPolicyGroupMappingModel.agent_id == agent_id)
+        .all()
+    )
+
+    result: list[AgentGroupListItem] = []
+    for g in rows:
+        member_pids = [
+            m.policy_id
+            for m in db.query(PolicyGroupMemberModel)
+            .filter(PolicyGroupMemberModel.group_id == g.id)
+            .all()
+        ]
+        result.append(AgentGroupListItem(group_id=g.id, name=g.name, policy_ids=member_pids))
+    return result

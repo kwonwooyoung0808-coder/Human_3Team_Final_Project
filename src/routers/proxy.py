@@ -11,6 +11,7 @@ from src.schemas.proxy import ProxyChatRequest, ProxyChatResponse
 from src.services.safe_response_generator import generate_safe_response
 from src.services.sovereign_ai_client import SovereignAIClient
 from src.services.violation_reporter import report_violation
+from src.utils.agent_policies import resolve_agent_policy_ids
 from src.workflows.compliance_workflow import build_compliance_graph
 from src.workflows.query_risk_workflow import build_query_risk_graph
 
@@ -59,15 +60,16 @@ async def proxy_chat(
             detail=f"agent_id={request.agent_id} 없음 또는 비활성",
         )
 
-    # Stage A 정책 분리 전략
+    # Stage A 정책 분리 전략 + Phase 2-C 그룹 결합
     # F1: 시스템 입력 정책만 사용 (보편 안전 필터)
-    # F2: 시스템 정책 + agent/request 의 부서별 정책 결합
+    # F2: 시스템 + agent.policy_id + agent 가 속한 모든 그룹의 멤버 정책
     system_policy_id = settings.system_input_policy_id
-    department_policy_id = request.policy_id or agent.policy_id
-
-    f2_policy_ids: list[str] = [system_policy_id]
-    if department_policy_id and department_policy_id != system_policy_id:
-        f2_policy_ids.append(department_policy_id)
+    f2_policy_ids = resolve_agent_policy_ids(
+        db,
+        agent=agent,
+        system_policy_id=system_policy_id,
+        request_policy_id=request.policy_id,
+    )
 
     # 모든 결합 정책이 활성 상태여야 함
     for pid in f2_policy_ids:

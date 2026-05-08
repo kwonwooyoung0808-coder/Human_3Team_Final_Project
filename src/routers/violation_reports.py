@@ -27,7 +27,9 @@ class ViolationReportItem(BaseModel):
     primary_category: str | None
     summary: str
     original_query: str | None
+    masked_query: str | None
     original_response: str | None
+    masked_response: str | None
     violations: list[dict] = Field(default_factory=list)
     risk_reasons: list[str] = Field(default_factory=list)
     status: str
@@ -58,7 +60,9 @@ def _to_item(r: ViolationReportModel) -> ViolationReportItem:
         primary_category=r.primary_category,
         summary=r.summary,
         original_query=r.original_query,
+        masked_query=r.masked_query,
         original_response=r.original_response,
+        masked_response=r.masked_response,
         violations=r.violations or [],
         risk_reasons=r.risk_reasons or [],
         status=r.status,

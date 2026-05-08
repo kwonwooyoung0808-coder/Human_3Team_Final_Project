@@ -9,6 +9,7 @@ from langgraph.graph import END, StateGraph
 from src.database.connection import SessionLocal
 from src.database.models import QueryAuditLogModel
 from src.schemas.query_risk import QueryRiskState
+from src.utils.masker import mask_pii
 from src.utils.yaml_loader import load_policy
 
 
@@ -260,6 +261,7 @@ def audit_logger_node(state: QueryRiskState) -> dict:
     risk_reasons 컬럼에는 룰 위반 + LLM 사유 합본 저장 → 사후 감사 시 차단 근거 추적 가능.
     """
     audit_id = str(uuid.uuid4())
+    masked_query, pii_detected = mask_pii(state["query"])
     session = SessionLocal()
     try:
         session.add(QueryAuditLogModel(
@@ -268,6 +270,8 @@ def audit_logger_node(state: QueryRiskState) -> dict:
             agent_id=state["agent_id"],
             policy_id=state["policy_id"],
             query=state["query"],
+            masked_query=masked_query,
+            pii_detected=pii_detected,
             context=state.get("context"),
             risk_score=state.get("final_score", 0.0),
             status=state.get("final_status", "PASSED"),

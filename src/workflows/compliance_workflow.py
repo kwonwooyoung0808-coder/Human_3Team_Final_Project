@@ -13,6 +13,7 @@ from src.engines.policy_engine import PolicyEngine
 from src.schemas.compliance import ComplianceState
 from src.schemas.policy import Policy
 from src.services.ollama_client import OllamaClient
+from src.utils.masker import mask_pii
 from src.utils.yaml_loader import load_policy
 
 
@@ -341,6 +342,9 @@ def audit_logger_node(state: ComplianceState) -> dict:
     audit_policy_id = state.get("policy_id") or (state.get("policy_ids") or [None])[0]
     session = SessionLocal()
     try:
+        masked_query, pii_q = mask_pii(state["query"])
+        masked_response, pii_r = mask_pii(state["response"])
+        merged_pii = pii_q + pii_r
         session.add(ResponseAuditLogModel(
             id=audit_id,
             trace_id=state.get("trace_id"),
@@ -348,7 +352,10 @@ def audit_logger_node(state: ComplianceState) -> dict:
             agent_id=state["agent_id"],
             policy_id=audit_policy_id,
             query=state["query"],
+            masked_query=masked_query,
             response=state["response"],
+            masked_response=masked_response,
+            pii_detected=merged_pii or None,
             compliance_score=state.get("final_score", 0.0),
             status=state.get("final_status", "APPROVED"),
             violations=state.get("all_violations", []),

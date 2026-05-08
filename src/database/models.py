@@ -116,6 +116,9 @@ class QueryAuditLogModel(Base):
     agent_id: Mapped[str] = mapped_column(String(80), ForeignKey("agents.id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), ForeignKey("policies.id"), index=True)
     query: Mapped[str] = mapped_column(Text)
+    # PRD §6: PII 마스킹 사본 — 운영자/감사자에게 우선 노출됨. 원본은 query 컬럼 보존.
+    masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pii_detected: Mapped[list | None] = mapped_column(JSON, nullable=True)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     risk_score: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(50))
@@ -140,7 +143,10 @@ class ResponseAuditLogModel(Base):
     agent_id: Mapped[str] = mapped_column(String(80), ForeignKey("agents.id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), ForeignKey("policies.id"), index=True)
     query: Mapped[str] = mapped_column(Text)
+    masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     response: Mapped[str] = mapped_column(Text)
+    masked_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pii_detected: Mapped[list | None] = mapped_column(JSON, nullable=True)
     compliance_score: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(50))
     violations: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -170,6 +176,43 @@ class InquiryModel(Base):
     )
 
 
+class PolicyGroupModel(Base):
+    """정책 그룹 — 부서/팀 단위 정책 묶음 (PRD §X 다대다 매핑)."""
+    __tablename__ = "policy_groups"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PolicyGroupMemberModel(Base):
+    """정책 그룹 ↔ 정책 다대다 (그룹 1개에 여러 정책)."""
+    __tablename__ = "policy_group_members"
+
+    group_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("policy_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    policy_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("policies.id"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AgentPolicyGroupMappingModel(Base):
+    """에이전트 ↔ 정책 그룹 다대다 (에이전트가 여러 그룹 소속 가능)."""
+    __tablename__ = "agent_policy_group_mapping"
+
+    agent_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True
+    )
+    group_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("policy_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class ViolationReportModel(Base):
     """PRD §7 Policy Violation Reporter — 차단/거부된 사례를 자동 리포트.
 
@@ -196,7 +239,9 @@ class ViolationReportModel(Base):
     primary_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
     summary: Mapped[str] = mapped_column(Text)
     original_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     original_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    masked_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     violations: Mapped[list | None] = mapped_column(JSON, nullable=True)
     risk_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # NEW(접수) / REVIEWING(검토중) / RESOLVED(조치완료) / DISMISSED(반려)

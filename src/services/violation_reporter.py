@@ -12,6 +12,7 @@ import uuid
 
 from src.database.connection import SessionLocal
 from src.database.models import ViolationReportModel
+from src.utils.masker import mask_pii
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ def report_violation(
 ) -> str | None:
     """위반 리포트를 INSERT 하고 생성된 report_id 를 반환. 실패 시 None."""
     report_id = str(uuid.uuid4())
+    masked_q, _ = mask_pii(original_query)
+    masked_r, _ = mask_pii(original_response)
     session = SessionLocal()
     try:
         session.add(ViolationReportModel(
@@ -74,7 +77,9 @@ def report_violation(
             primary_category=_primary_category(violations),
             summary=_summary_from(violations, risk_reasons),
             original_query=original_query,
+            masked_query=masked_q,
             original_response=original_response,
+            masked_response=masked_r,
             violations=violations or [],
             risk_reasons=risk_reasons or [],
             status="NEW",
