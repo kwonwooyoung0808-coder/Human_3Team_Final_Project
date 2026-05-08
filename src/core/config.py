@@ -31,6 +31,11 @@ class Settings(BaseModel):
     # F2 (응답 검증) 는 시스템 정책 + agent 의 부서별 정책을 결합
     system_input_policy_id: str = os.getenv("SYSTEM_INPUT_POLICY_ID", "CONTENT_001")
 
+    # ── F2 Self-Consistency Check (PRD §5.2.2) ──
+    # True  : Judge LLM 을 temp=0.0 / temp=0.7 로 2회 병렬 호출 후 verdict 비교 (정확도 ↑, latency ↑)
+    # False : 단일 호출만 (CPU 환경 권장 — 8B 모델 Self-Consistency 는 timeout 위험)
+    enable_self_consistency: bool = os.getenv("ENABLE_SELF_CONSISTENCY", "false").lower() == "true"
+
     # ── Governance LLM (정책 평가/Judge 용 내부 도구) ──
     governance_llm_url: str = os.getenv(
         "GOVERNANCE_LLM_URL", os.getenv("OLLAMA_URL", "http://localhost:11434")

@@ -13,6 +13,7 @@ from src.routers import (
     inquiry,
     policy_compiler,
     policy_groups,
+    policy_versions,
     proxy,
     response_guard,
     runs,
@@ -57,3 +58,4 @@ app.include_router(proxy.router)
 app.include_router(inquiry.router)
 app.include_router(violation_reports.router)
 app.include_router(policy_groups.router)
+app.include_router(policy_versions.router)

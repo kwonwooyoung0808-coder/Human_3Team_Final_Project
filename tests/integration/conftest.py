@@ -53,17 +53,32 @@ def mock_ollama(monkeypatch):
         '{"risk_score": 0.1, "risk_reasons": [], "risk_types": []}'
     )
 
+    canned_sovereign = "안녕하세요. 무엇을 도와드릴까요?"
+
     async def fake_generate(self, prompt: str, temperature=None) -> str:
         return canned_generate
 
     async def fake_chat(self, system_prompt, user_message, temperature=None) -> str:
         return canned_chat
 
-    from src.services import ollama_client
+    async def fake_sovereign_generate(self, query: str, context=None) -> str:
+        return canned_sovereign
+
+    from src.services import ollama_client, sovereign_ai_client
     monkeypatch.setattr(ollama_client.OllamaClient, "generate", fake_generate)
     monkeypatch.setattr(ollama_client.OllamaClient, "chat", fake_chat)
+    # Sovereign AI 도 mock — Ollama 가 실행 중이지 않아도 테스트 격리 보장
+    monkeypatch.setattr(
+        sovereign_ai_client.SovereignAIClient,
+        "generate",
+        fake_sovereign_generate,
+    )
 
-    return {"generate": canned_generate, "chat": canned_chat}
+    return {
+        "generate": canned_generate,
+        "chat": canned_chat,
+        "sovereign": canned_sovereign,
+    }
 
 
 @pytest.fixture

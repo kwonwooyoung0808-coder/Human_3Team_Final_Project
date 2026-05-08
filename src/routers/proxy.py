@@ -108,6 +108,7 @@ async def proxy_chat(
             trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=query_audit_id,
+            policy_version=q_final.get("policy_version"),
             original_query=request.query,
             violations=q_final.get("rule_violations") or [],
             risk_reasons=risk_reasons,
@@ -126,11 +127,13 @@ async def proxy_chat(
     try:
         ai_response = await _call_sovereign_ai(request.query, request.context)
     except Exception as e:
+        # str(e) 가 비어있는 예외 (ReadTimeout 등) 도 type 으로 진단
+        detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         return ProxyChatResponse(
             status="FAILED",
             query_audit_id=query_audit_id,
             risk_score=risk_score,
-            error_message=f"Sovereign AI 호출 실패: {e}",
+            error_message=f"Sovereign AI 호출 실패: {detail}",
             trace_id=trace_id,
         )
 
@@ -170,6 +173,7 @@ async def proxy_chat(
             agent_id=request.agent_id,
             query_audit_id=query_audit_id,
             response_audit_id=response_audit_id,
+            policy_version=r_final.get("policy_version"),
             original_query=request.query,
             original_response=ai_response,
             violations=raw_violations,

@@ -15,6 +15,7 @@ from src.core.dependencies import get_db
 from src.database.connection import SessionLocal
 from src.database.models import PolicyConversionLogModel, PolicyModel
 from src.schemas.doc_parser import PolicyConvertResponse
+from src.utils.policy_cache import get_policy_cache
 from src.workflows.doc_parser_workflow import build_doc_parser_graph
 
 router = APIRouter(prefix="/v1/policy-compiler", tags=["policy-compiler"])
@@ -169,6 +170,8 @@ def activate_policy(policy_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail=f"policy_id={policy_id} 없음")
     row.is_active = True
     db.commit()
+    # Phase 3-B: 활성 상태 전환 시 캐시 무효화 (이전 비활성 상태 캐시 잔존 방지)
+    get_policy_cache().invalidate(policy_id)
     return {"policy_id": policy_id, "is_active": True, "name": row.name}
 
 

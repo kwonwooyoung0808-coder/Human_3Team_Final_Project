@@ -10,7 +10,7 @@ from src.database.connection import SessionLocal
 from src.database.models import QueryAuditLogModel
 from src.schemas.query_risk import QueryRiskState
 from src.utils.masker import mask_pii
-from src.utils.yaml_loader import load_policy
+from src.utils.policy_cache import get_policy_cache
 
 
 # ──────────────────────────────────────────────────────────────
@@ -20,9 +20,10 @@ def policy_loader_node(state: QueryRiskState) -> dict:
     """
     DB의 policies 테이블에서 policy_id로 yaml_path 조회.
     is_active=TRUE인 정책만 허용.
+    Phase 3-A: 활성 PolicyVersion 조회해 audit 기록용 version 문자열을 state 에 저장.
     실패 → rule_blocked=True (Fail-Safe BLOCKED).
     """
-    from src.database.models import PolicyModel
+    from src.database.models import PolicyModel, PolicyVersionModel
     session = SessionLocal()
     try:
         row = session.query(PolicyModel).filter(
@@ -41,8 +42,16 @@ def policy_loader_node(state: QueryRiskState) -> dict:
                 }],
             }
 
-        policy = load_policy(row.yaml_path)
-        return {"policy": policy.model_dump()}
+        # 현재 활성 버전 조회 (없으면 PolicyModel.version 으로 fallback)
+        ver_row = session.query(PolicyVersionModel).filter(
+            PolicyVersionModel.policy_id == state["policy_id"],
+            PolicyVersionModel.is_current == True,
+        ).first()
+        version = ver_row.version if ver_row else row.version
+
+        # Phase 3-B: 캐시 경유 (디스크 I/O 1회/버전)
+        policy = get_policy_cache().get(state["policy_id"], version, row.yaml_path)
+        return {"policy": policy.model_dump(), "policy_version": version}
 
     except Exception as e:
         return {
@@ -269,6 +278,7 @@ def audit_logger_node(state: QueryRiskState) -> dict:
             trace_id=state.get("trace_id"),
             agent_id=state["agent_id"],
             policy_id=state["policy_id"],
+            policy_version=state.get("policy_version"),
             query=state["query"],
             masked_query=masked_query,
             pii_detected=pii_detected,

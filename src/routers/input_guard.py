@@ -68,6 +68,7 @@ async def input_guard_check(
             trace_id=trace_id,
             agent_id=request.agent_id,
             query_audit_id=final.get("audit_id"),
+            policy_version=final.get("policy_version"),
             original_query=request.query,
             violations=final.get("rule_violations") or [],
             risk_reasons=final.get("combined_reasons", []),

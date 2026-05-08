@@ -25,6 +25,7 @@ class ViolationReportItem(BaseModel):
     response_audit_id: str | None
     severity: str
     primary_category: str | None
+    policy_version: str | None
     summary: str
     original_query: str | None
     masked_query: str | None
@@ -58,6 +59,7 @@ def _to_item(r: ViolationReportModel) -> ViolationReportItem:
         response_audit_id=r.response_audit_id,
         severity=r.severity,
         primary_category=r.primary_category,
+        policy_version=r.policy_version,
         summary=r.summary,
         original_query=r.original_query,
         masked_query=r.masked_query,

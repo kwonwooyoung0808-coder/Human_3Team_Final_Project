@@ -41,8 +41,14 @@ def seed_existing_policies() -> None:
     src/policies/ 의 기존 YAML 파일을 policies 테이블에 자동 등록.
     이미 존재하는 id는 건너뜀 (멱등성 보장).
     Feature 1/2가 기존 정책을 즉시 사용할 수 있도록 is_active=TRUE로 등록.
+
+    Phase 3-A: 새로 등록되는 정책에 대해 PolicyVersionModel 의 첫 버전 (v1.0 또는
+    YAML 의 version 필드 그대로) 도 함께 INSERT — is_current=TRUE.
     """
-    from src.database.models import PolicyModel
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    from src.database.models import PolicyModel, PolicyVersionModel
     from src.utils.yaml_loader import PolicyLoaderError, load_policy
 
     try:
@@ -66,12 +72,29 @@ def seed_existing_policies() -> None:
 
                 # YAML 의 enabled 플래그를 DB 의 is_active 와 매핑
                 # (enabled: false 정책은 등록되지만 비활성 상태로 — 추후 PUT /activate 로 켤 수 있음)
+                version_str = policy.version or "1.0"
                 session.add(PolicyModel(
                     id=policy.id,
                     name=policy.name,
-                    version=policy.version or "1.0",
+                    version=version_str,
                     yaml_path=str(yaml_path),
                     is_active=bool(getattr(policy, "enabled", True)),
+                ))
+
+                # 첫 버전 row 도 함께 등록 (이 시점 YAML 스냅샷 보존)
+                try:
+                    snapshot = Path(yaml_path).read_text(encoding="utf-8")
+                except OSError:
+                    snapshot = None
+                now = datetime.now(timezone.utc)
+                session.add(PolicyVersionModel(
+                    id=str(_uuid.uuid4()),
+                    policy_id=policy.id,
+                    version=version_str,
+                    yaml_path=str(yaml_path),
+                    yaml_snapshot=snapshot,
+                    is_current=True,
+                    activated_at=now,
                 ))
             session.commit()
         except Exception as e:

@@ -40,6 +40,7 @@ class ComplianceState(TypedDict, total=False):
     trace_id: str            # PRD §6 추적 체인
 
     policy: dict[str, Any]
+    policy_version: str | None  # Phase 3-A 활성 버전 (audit 기록용)
     rule_violations: list[dict[str, Any]]
     rule_rejected: bool
 

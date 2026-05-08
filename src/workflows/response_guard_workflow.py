@@ -14,7 +14,7 @@ from src.schemas.compliance import ComplianceState
 from src.schemas.policy import Policy
 from src.services.ollama_client import OllamaClient
 from src.utils.masker import mask_pii
-from src.utils.yaml_loader import load_policy
+from src.utils.policy_cache import get_policy_cache
 
 
 # ──────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ def policy_loader_node(state: ComplianceState) -> dict:
     state["policy_id"] 만 있으면 단일 로드 (하위 호환).
     is_active=TRUE 인 정책만 허용. 실패 → rule_rejected=True (F2-9).
     """
-    from src.database.models import PolicyModel
+    from src.database.models import PolicyModel, PolicyVersionModel
     from src.utils.policy_combiner import combine_policies
 
     # 다중 정책 vs 단일 정책 결정
@@ -47,6 +47,9 @@ def policy_loader_node(state: ComplianceState) -> dict:
     session = SessionLocal()
     try:
         loaded_policies = []
+        cache = get_policy_cache()
+        primary_version: str | None = None
+
         for pid in policy_ids:
             row = session.query(PolicyModel).filter(
                 PolicyModel.id == pid,
@@ -62,10 +65,23 @@ def policy_loader_node(state: ComplianceState) -> dict:
                         "severity": "HIGH",
                     }],
                 }
-            loaded_policies.append(load_policy(row.yaml_path))
+
+            # 활성 버전 조회 (없으면 PolicyModel.version 으로 fallback)
+            ver_row = session.query(PolicyVersionModel).filter(
+                PolicyVersionModel.policy_id == pid,
+                PolicyVersionModel.is_current == True,
+            ).first()
+            version = ver_row.version if ver_row else row.version
+
+            # 첫 번째 (시스템 정책) 버전을 audit 대표로 기록
+            if primary_version is None:
+                primary_version = version
+
+            # Phase 3-B: 캐시 경유 — 같은 (policy_id, version) 은 디스크 I/O 1회만
+            loaded_policies.append(cache.get(pid, version, row.yaml_path))
 
         combined = combine_policies(loaded_policies) if len(loaded_policies) > 1 else loaded_policies[0]
-        return {"policy": combined.model_dump()}
+        return {"policy": combined.model_dump(), "policy_version": primary_version}
 
     except Exception as e:
         return {
@@ -161,8 +177,12 @@ _BIAS_HALLUCINATION_CRITERIA = """
 
 async def llm_compliance_agent_node(state: ComplianceState) -> dict:
     """
-    JudgeEngine 의 프롬프트 조립 + OllamaClient 비동기 chat() 조합.
-    Self-Consistency: 2회 호출 (temperature 0.0 / 0.7) 후 verdict 비교.
+    JudgeEngine 의 프롬프트 조립 + OllamaClient 비동기 generate() 조합.
+
+    Phase 3-C 분기:
+    - settings.enable_self_consistency = True : 2회 병렬 호출 (temp 0.0/0.7) 후 verdict 비교
+    - settings.enable_self_consistency = False: 단일 호출 (temp 0.0). CPU 환경 권장.
+
     실패 → FLAGGED Fallback (score=0.5 + LLM_ERROR violation).
     """
     policy_dict = state.get("policy", {})
@@ -198,48 +218,58 @@ async def llm_compliance_agent_node(state: ComplianceState) -> dict:
         )
 
         client = OllamaClient()
-        # F2-2: Self-Consistency Check — 2회 병렬 호출
-        raw_low, raw_high = await asyncio.gather(
-            client.generate(rendered, temperature=0.0),
-            client.generate(rendered, temperature=0.7),
-            return_exceptions=False,
-        )
-
-        result_low = judge_engine._parse_llm_json_result(raw_low)
-        result_high = judge_engine._parse_llm_json_result(raw_high)
-
-        if not result_low or not result_high:
-            raise ValueError("LLM 파싱 실패")
-
         violations: list[dict] = []
 
-        # 두 호출 verdict 비교
-        if result_low.verdict == "FAIL" and result_high.verdict == "FAIL":
-            # 일관된 FAIL → 정책 위반 확정
-            avg_conf = (result_low.confidence + result_high.confidence) / 2
-            score = 1.0 - avg_conf
-            violations.append({
-                "type":        "LLM_COMPLIANCE",
-                "description": result_low.reason,
-                "severity":    "HIGH" if avg_conf >= 0.8 else "MEDIUM",
-            })
-        elif result_low.verdict == "PASS" and result_high.verdict == "PASS":
-            # 일관된 PASS → 위반 없음
-            score = (result_low.confidence + result_high.confidence) / 2
+        if settings.enable_self_consistency:
+            # F2-2: Self-Consistency Check — 2회 병렬 호출
+            raw_low, raw_high = await asyncio.gather(
+                client.generate(rendered, temperature=0.0),
+                client.generate(rendered, temperature=0.7),
+                return_exceptions=False,
+            )
+
+            result_low = judge_engine._parse_llm_json_result(raw_low)
+            result_high = judge_engine._parse_llm_json_result(raw_high)
+
+            if result_low.verdict == "FAIL" and result_high.verdict == "FAIL":
+                avg_conf = (result_low.confidence + result_high.confidence) / 2
+                score = 1.0 - avg_conf
+                violations.append({
+                    "type":        "LLM_COMPLIANCE",
+                    "description": result_low.reason,
+                    "severity":    "HIGH" if avg_conf >= 0.8 else "MEDIUM",
+                })
+            elif result_low.verdict == "PASS" and result_high.verdict == "PASS":
+                score = (result_low.confidence + result_high.confidence) / 2
+            else:
+                # 불일치 → Self-Consistency 실패
+                score = 0.5
+                failed = result_low if result_low.verdict == "FAIL" else result_high
+                violations.append({
+                    "type":        "INCONSISTENT_RESPONSE",
+                    "description": (
+                        f"Self-Consistency Check 실패: 동일 응답을 2회 평가했으나 "
+                        f"verdict 불일치 (low_temp={result_low.verdict}, "
+                        f"high_temp={result_high.verdict}). "
+                        f"FAIL 판정 사유: {failed.reason}"
+                    ),
+                    "severity":    "MEDIUM",
+                })
         else:
-            # 불일치 → Self-Consistency 실패 (잠재적 hallucination/불안정 응답)
-            score = 0.5
-            failed = result_low if result_low.verdict == "FAIL" else result_high
-            violations.append({
-                "type":        "INCONSISTENT_RESPONSE",
-                "description": (
-                    f"Self-Consistency Check 실패: 동일 응답을 2회 평가했으나 "
-                    f"verdict 불일치 (low_temp={result_low.verdict}, "
-                    f"high_temp={result_high.verdict}). "
-                    f"FAIL 판정 사유: {failed.reason}"
-                ),
-                "severity":    "MEDIUM",
-            })
+            # 단일 호출 모드 (CPU 환경 권장).
+            # temp=0.0 으로 결정론적 판정. Self-Consistency 효과는 잃지만 latency 절반.
+            raw = await client.generate(rendered, temperature=0.0)
+            result = judge_engine._parse_llm_json_result(raw)
+
+            if result.verdict == "FAIL":
+                score = 1.0 - result.confidence
+                violations.append({
+                    "type":        "LLM_COMPLIANCE",
+                    "description": result.reason,
+                    "severity":    "HIGH" if result.confidence >= 0.8 else "MEDIUM",
+                })
+            else:
+                score = result.confidence
 
         return {"llm_compliance_score": score, "llm_violations": violations}
 
@@ -351,6 +381,7 @@ def audit_logger_node(state: ComplianceState) -> dict:
             query_audit_id=state.get("audit_query_id"),
             agent_id=state["agent_id"],
             policy_id=audit_policy_id,
+            policy_version=state.get("policy_version"),
             query=state["query"],
             masked_query=masked_query,
             response=state["response"],

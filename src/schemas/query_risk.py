@@ -33,6 +33,7 @@ class QueryRiskState(TypedDict, total=False):
     trace_id: str
 
     policy: dict[str, Any]
+    policy_version: str | None  # Phase 3-A 활성 버전 (audit 기록용)
     rule_violations: list[dict[str, Any]]
     rule_blocked: bool
 

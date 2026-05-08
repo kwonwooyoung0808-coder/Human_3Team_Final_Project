@@ -1,8 +1,37 @@
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from src.core.config import get_settings
+
+# qwen3 / deepseek-r1 등 thinking-mode 모델은 응답 앞에 <think>...</think> 블록을
+# 출력해 JudgeEngine JSON 파서를 깨뜨린다. 또한 thinking 토큰이 수백~수천 개라
+# CPU 환경에서 latency 도 폭증.
+#
+# 3중 방어:
+#   ① 프롬프트 prefix /no_think    — qwen3 공식 디렉티브로 thinking 자체 차단
+#   ② payload "think": False      — Ollama 0.5+ 옵션, 모델 단에서 차단
+#   ③ 응답 후처리 _strip_thinking — 위 둘이 무시되어도 결과 정제 (안전망)
+_NO_THINK_DIRECTIVE = "/no_think"
+_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """LLM 응답에서 <think>...</think> 블록 제거. 없으면 원문 그대로."""
+    if not text or "<think>" not in text.lower():
+        return text
+    return _THINK_BLOCK.sub("", text).lstrip()
+
+
+def _prepend_no_think(text: str) -> str:
+    """이미 디렉티브가 있으면 중복 추가하지 않음."""
+    if not text:
+        return _NO_THINK_DIRECTIVE
+    if text.lstrip().startswith(_NO_THINK_DIRECTIVE):
+        return text
+    return f"{_NO_THINK_DIRECTIVE}\n{text}"
 
 
 class OllamaClient:
@@ -29,17 +58,18 @@ class OllamaClient:
         """
         payload = {
             "model": self.model,
-            "prompt": prompt,
+            "prompt": _prepend_no_think(prompt),  # 방어 ①
             "stream": False,
+            "think": False,                        # 방어 ②
             "options": {
                 "temperature": temperature if temperature is not None else self.temperature
             },
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(f"{self.base_url}/api/generate", json=payload)
             response.raise_for_status()
             data = response.json()
-        return data.get("response", "")
+        return _strip_thinking(data.get("response", ""))  # 방어 ③
 
     async def chat(
         self,
@@ -55,18 +85,20 @@ class OllamaClient:
         messages = []
         if system_prompt:  # 빈 문자열이면 system 메시지 생략
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_message})
+        # 사용자 메시지 앞에 /no_think 디렉티브 (방어 ①)
+        messages.append({"role": "user", "content": _prepend_no_think(user_message)})
 
         payload = {
             "model": self.model,
             "stream": False,
+            "think": False,  # 방어 ②
             "options": {
                 "temperature": temperature if temperature is not None else self.temperature
             },
             "messages": messages,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(f"{self.base_url}/api/chat", json=payload)
             response.raise_for_status()
             data = response.json()
-        return data.get("message", {}).get("content", "")
+        return _strip_thinking(data.get("message", {}).get("content", ""))  # 방어 ③

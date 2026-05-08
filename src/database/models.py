@@ -115,6 +115,8 @@ class QueryAuditLogModel(Base):
     trace_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     agent_id: Mapped[str] = mapped_column(String(80), ForeignKey("agents.id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), ForeignKey("policies.id"), index=True)
+    # Phase 3-A: 어느 버전의 정책으로 평가되었는지 (사후 감사용)
+    policy_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     query: Mapped[str] = mapped_column(Text)
     # PRD §6: PII 마스킹 사본 — 운영자/감사자에게 우선 노출됨. 원본은 query 컬럼 보존.
     masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -142,6 +144,7 @@ class ResponseAuditLogModel(Base):
     )
     agent_id: Mapped[str] = mapped_column(String(80), ForeignKey("agents.id"), index=True)
     policy_id: Mapped[str] = mapped_column(String(80), ForeignKey("policies.id"), index=True)
+    policy_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     query: Mapped[str] = mapped_column(Text)
     masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     response: Mapped[str] = mapped_column(Text)
@@ -237,6 +240,7 @@ class ViolationReportModel(Base):
     )
     severity: Mapped[str] = mapped_column(String(20), default="HIGH")
     primary_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    policy_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     summary: Mapped[str] = mapped_column(Text)
     original_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     masked_query: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -252,6 +256,32 @@ class ViolationReportModel(Base):
 
     __table_args__ = (
         Index("ix_violation_report_status_created", "status", "created_at"),
+    )
+
+
+class PolicyVersionModel(Base):
+    """정책 버전 이력 (Phase 3-A).
+
+    한 policy_id 에 여러 행 존재. is_current=TRUE 인 행이 활성 버전 (정확히 1개).
+    yaml_snapshot 은 그 시점 YAML 전문을 보존해 파일 변경/삭제로부터 감사를 보호한다.
+    """
+    __tablename__ = "policy_versions"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    policy_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("policies.id"), index=True
+    )
+    version: Mapped[str] = mapped_column(String(50))
+    yaml_path: Mapped[str] = mapped_column(String(512))
+    yaml_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_policy_version_policy_current", "policy_id", "is_current"),
+        Index("uq_policy_id_version", "policy_id", "version", unique=True),
     )
 
 

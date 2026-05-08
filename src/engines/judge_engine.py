@@ -1,14 +1,27 @@
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 import yaml
 from src.core.config import get_settings
 from src.schemas.judge import JudgeResult
 from src.schemas.policy import Policy
 
+
+# Phase 3-B: 프롬프트 템플릿은 deploy 시점에 고정되므로 process-lifetime LRU 적합.
+# JudgeEngine 인스턴스가 매 호출마다 생성되어도 디스크 I/O 는 첫 호출 1회뿐.
+@lru_cache(maxsize=32)
+def _read_prompt_cached(absolute_path: str) -> str:
+    """프롬프트 파일을 읽어 캐시. 키는 절대경로 문자열."""
+    p = Path(absolute_path)
+    if not p.exists():
+        return ""
+    return p.read_text(encoding="utf-8")
+
+
 class JudgeEngine:
     """
-    [Final Version] 
+    [Final Version]
     - 재시도 제한 로직 대응을 위한 신뢰도 설계
     - 심각도(Severity) 기반 차단 차등화 (Critical vs Warning)
     - LLM 장애 시나리오별 Fallback 전략 포함
@@ -18,11 +31,8 @@ class JudgeEngine:
         self.llm_client = llm_client # 실제 연결 시 주입
 
     def _read_prompt(self, name: str) -> str:
-        """프롬프트 파일(.txt, .yaml)을 읽어옵니다."""
-        path = self.prompt_dir / name
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
+        """프롬프트 파일(.txt, .yaml)을 읽어옵니다. Phase 3-B 부터 LRU 캐시 적용."""
+        return _read_prompt_cached(str((self.prompt_dir / name).resolve()))
 
     def _get_filtered_few_shot(self, policy_id: str) -> str:
         """
@@ -119,17 +129,37 @@ class JudgeEngine:
             evidence_text=judged_text[:120] or None,
         )
 
-    def _parse_llm_json_result(self, raw_llm_output: str) -> JudgeResult | None:
-        """
-        [안정성 확보] LLM이 JSON 외에 앞뒤로 덧붙인 설명 문구에서 순수 JSON 부분만 정규식으로 추출합니다.
-        """
-        if not raw_llm_output:
-            return None
+    def _parse_llm_json_result(self, raw_llm_output: str) -> JudgeResult:
+        """LLM 출력에서 JSON 부분 추출. 항상 JudgeResult 반환 — 파싱 실패 시
+        보수적 FAIL 로 처리해 호출자가 None 체크/raise 할 필요 없음.
 
-        # 정규표현식을 통해 가장 바깥쪽 { } 구간을 찾아냄
-        json_match = re.search(r"\{.*\}", raw_llm_output, re.DOTALL)
+        지원 포맷:
+        - 순수 JSON
+        - 앞뒤 설명 문구 + JSON
+        - ```json ... ``` 마크다운 코드 블록
+        - ``` ... ``` 일반 코드 블록
+        """
+        if not raw_llm_output or not raw_llm_output.strip():
+            return JudgeResult(
+                verdict="FAIL",
+                confidence=0.0,
+                reason="LLM이 빈 응답을 반환했습니다.",
+                evidence_text=None,
+            )
+
+        # ① 마크다운 코드 블록 제거 (```json ... ``` 또는 ``` ... ```)
+        cleaned = re.sub(r"```(?:json)?\s*", "", raw_llm_output, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("```", "")
+
+        # ② 가장 바깥쪽 { } 구간 추출
+        json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if not json_match:
-            return None
+            return JudgeResult(
+                verdict="FAIL",
+                confidence=0.0,
+                reason="LLM 응답에서 JSON 구조를 찾지 못함",
+                evidence_text=raw_llm_output[:200] or None,
+            )
 
         try:
             parsed_result = json.loads(json_match.group())
@@ -138,8 +168,8 @@ class JudgeEngine:
             return JudgeResult(
                 verdict="FAIL",
                 confidence=0.0,
-                reason=f"Failed to parse LLM output: {str(e)}",
-                evidence_text=raw_llm_output[:100] or None,
+                reason=f"JSON 파싱 실패: {type(e).__name__}: {e}",
+                evidence_text=raw_llm_output[:200] or None,
             )
 
     def _determine_action_by_severity(self, result: JudgeResult, policy_id: str) -> JudgeResult:
@@ -201,24 +231,27 @@ class JudgeEngine:
         )
 
         # 2. LLM 호출 및 에러 처리
+        llm_unavailable = False
         try:
             if self.llm_client:
                 raw_llm_output = self.llm_client.generate(rendered_prompt)
             else:
-                raw_llm_output = None # 테스트용
+                raw_llm_output = None  # 테스트용
+                llm_unavailable = True
         except Exception as e:
             print(f"Critical LLM Error: {e}")
             raw_llm_output = None
+            llm_unavailable = True
 
-        # 3. 파싱 및 기본 판정값 획득
-        parsed_result = self._parse_llm_json_result(raw_llm_output)
-        
-        # 4. 판정 실패 시(모델 응답 없음 등) Fallback 적용
-        if not parsed_result:
+        # 3. LLM 자체가 없거나 실패한 경우 → 정책별 Fallback
+        # (파서가 빈 입력에도 JudgeResult(FAIL) 을 반환하므로 별도 분기 필요)
+        if llm_unavailable or not raw_llm_output:
             if policy.id == "GROUND_001":
                 parsed_result = self._judge_groundedness_fallback(response, retrieved_context)
             else:
                 parsed_result = JudgeResult(verdict="PASS", confidence=0.5, reason="Default Pass on Failure")
+        else:
+            parsed_result = self._parse_llm_json_result(raw_llm_output)
 
         # 5. [신규] 심각도 기반 최종 액션 결정
         final_result = self._determine_action_by_severity(parsed_result, policy.id)

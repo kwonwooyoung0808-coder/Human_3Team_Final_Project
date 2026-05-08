@@ -111,6 +111,7 @@ async def response_guard_validate(
             agent_id=request.agent_id,
             query_audit_id=request.audit_query_id,
             response_audit_id=final.get("audit_id"),
+            policy_version=final.get("policy_version"),
             original_query=request.query,
             original_response=request.response,
             violations=raw_violations,
