@@ -1,4 +1,4 @@
-"""Feature 2 (POST /v1/response/validate) 통합 테스트.
+"""Feature 2 (POST /v1/response-guard/validate) 통합 테스트.
 
 PRD 5.2.6 수용 기준 검증:
 - REJECTED 응답은 사용자에게 전달되지 않음 (status 확인)
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 def test_unregistered_agent_returns_422(client):
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": "ghost",
             "query": "Q",
@@ -23,7 +23,7 @@ def test_unregistered_agent_returns_422(client):
 
 def test_invalid_audit_query_id_returns_422(client, seeded_agent):
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "Q",
@@ -38,7 +38,7 @@ def test_invalid_audit_query_id_returns_422(client, seeded_agent):
 def test_clean_response_approved(client, seeded_agent, mock_ollama):
     """LLM mock이 PASS verdict 반환 + 룰 위반 없음 → APPROVED."""
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -55,7 +55,7 @@ def test_clean_response_approved(client, seeded_agent, mock_ollama):
 def test_response_with_forbidden_term_rejected(client, seeded_agent, mock_ollama):
     """응답에 'violence' 포함 → 룰 엔진이 BLOCK → REJECTED."""
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "Q",
@@ -71,7 +71,7 @@ def test_response_with_forbidden_term_rejected(client, seeded_agent, mock_ollama
 def test_response_validate_persists_audit(client, seeded_agent, mock_ollama):
     """PRD 5.2.6: 모든 평가 결과는 근거와 함께 저장."""
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "Q",
@@ -100,7 +100,7 @@ def test_rule_rejected_violations_preserved_in_response(client, seeded_agent, mo
     'violence' 는 CONTENT_001 의 violence_hate.exact_terms 에 포함됨 → 룰로 REJECTED.
     """
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "위험한 행동에 대해 묻습니다",
@@ -120,7 +120,7 @@ def test_rule_rejected_violations_preserved_in_response(client, seeded_agent, mo
 def test_rule_rejected_violations_preserved_in_audit(client, seeded_agent, mock_ollama):
     """F2-1: 룰 차단 사유가 audit log 에도 저장되어야 함."""
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "위험한 행동에 대해 묻습니다",
@@ -151,7 +151,7 @@ def test_audit_query_id_agent_mismatch_returns_422(client, mock_ollama):
 
     # agent A 가 query check 호출 → audit_id 발급
     qc = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id":  agent_a["id"],
             "query":     "안녕하세요",
@@ -163,7 +163,7 @@ def test_audit_query_id_agent_mismatch_returns_422(client, mock_ollama):
 
     # agent B 가 A 의 audit_id 로 response validate 시도 → 422
     rv = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id":       agent_b["id"],
             "query":          "안녕하세요",
@@ -179,7 +179,7 @@ def test_audit_query_id_agent_mismatch_returns_422(client, mock_ollama):
 def test_audit_query_id_same_agent_succeeds(client, seeded_agent, mock_ollama):
     """F2-4 보완: 같은 에이전트끼리는 정상 연결되어야 함."""
     qc = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id":  seeded_agent["id"],
             "query":     "안녕하세요",
@@ -189,7 +189,7 @@ def test_audit_query_id_same_agent_succeeds(client, seeded_agent, mock_ollama):
     audit_id = qc.json()["audit_id"]
 
     rv = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id":       seeded_agent["id"],
             "query":          "안녕하세요",

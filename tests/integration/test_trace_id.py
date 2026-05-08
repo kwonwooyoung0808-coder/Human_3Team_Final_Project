@@ -26,7 +26,7 @@ def test_query_check_returns_auto_generated_trace_id(
     client, seeded_agent, mock_ollama
 ):
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -42,7 +42,7 @@ def test_query_check_returns_auto_generated_trace_id(
 
 def test_response_validate_returns_trace_id(client, seeded_agent, mock_ollama):
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "안녕하세요",
@@ -77,7 +77,7 @@ def test_x_trace_id_header_is_honored(client, seeded_agent, mock_ollama):
     """클라이언트가 X-Trace-Id 헤더로 보낸 ID 가 응답에 그대로 들어가야 한다."""
     custom = "custom-trace-12345"
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -92,7 +92,7 @@ def test_x_trace_id_header_is_clamped_to_80_chars(client, seeded_agent, mock_oll
     """80자 초과 trace_id 는 잘려야 한다 (DB 컬럼 길이 보호)."""
     huge = "x" * 200
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -108,7 +108,7 @@ def test_x_trace_id_header_is_clamped_to_80_chars(client, seeded_agent, mock_oll
 def test_blank_x_trace_id_header_falls_back_to_auto(client, seeded_agent, mock_ollama):
     """공백만 있는 헤더는 무시되고 서버 자동 발급."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -203,6 +203,6 @@ def test_two_separate_requests_get_distinct_trace_ids(
         "query": "오늘 날씨 어때?",
         "policy_id": "CONTENT_001",
     }
-    r1 = client.post("/v1/query/check", json=payload).json()
-    r2 = client.post("/v1/query/check", json=payload).json()
+    r1 = client.post("/v1/input-guard/check", json=payload).json()
+    r2 = client.post("/v1/input-guard/check", json=payload).json()
     assert r1["trace_id"] != r2["trace_id"]

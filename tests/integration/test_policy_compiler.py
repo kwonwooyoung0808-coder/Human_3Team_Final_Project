@@ -1,4 +1,4 @@
-"""Feature 3 (POST /v1/policy/convert) 회귀 테스트.
+"""Feature 3 (POST /v1/policy-compiler/compile) 회귀 테스트.
 
 PRD 5.3.6 수용 기준 검증:
 - 변환 실패 시 원본 파일과 오류 로그가 보존된다.
@@ -22,7 +22,7 @@ def test_convert_rejects_non_docx_extension(client):
     """라우터 입력 검증: .docx 외 확장자는 400."""
     fake_file = io.BytesIO(b"not a real docx")
     r = client.post(
-        "/v1/policy/convert",
+        "/v1/policy-compiler/compile",
         files={"file": ("policy.txt", fake_file, "text/plain")},
         data={"policy_name": "Test Policy", "effective_date": "2026-01-01"},
     )
@@ -33,7 +33,7 @@ def test_convert_rejects_oversized_file(client):
     """라우터 입력 검증: 10MB 초과 파일은 413."""
     big_content = b"a" * (10 * 1024 * 1024 + 1)
     r = client.post(
-        "/v1/policy/convert",
+        "/v1/policy-compiler/compile",
         files={"file": ("big.docx", io.BytesIO(big_content), "application/octet-stream")},
         data={"policy_name": "Big", "effective_date": "2026-01-01"},
     )
@@ -51,7 +51,7 @@ def test_convert_invalid_docx_preserves_original(client, tmp_path, monkeypatch):
 
     # policy_dir 가 신규 생성되더라도 안전하게 보존되는지만 확인
     r = client.post(
-        "/v1/policy/convert",
+        "/v1/policy-compiler/compile",
         files={"file": ("malformed.docx", io.BytesIO(fake_docx), "application/octet-stream")},
         data={"policy_name": "Malformed", "effective_date": "2026-01-01"},
     )
@@ -73,7 +73,7 @@ def test_convert_invalid_docx_creates_conversion_log(client):
 
     fake_docx = b"PK\x03\x04 broken"
     r = client.post(
-        "/v1/policy/convert",
+        "/v1/policy-compiler/compile",
         files={"file": ("broken.docx", io.BytesIO(fake_docx), "application/octet-stream")},
         data={"policy_name": "BrokenPolicy", "effective_date": "2026-01-01"},
     )

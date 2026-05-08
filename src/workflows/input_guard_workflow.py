@@ -291,7 +291,7 @@ def audit_logger_node(state: QueryRiskState) -> dict:
 # 그래프 조립
 # ──────────────────────────────────────────────────────────────
 @lru_cache
-def build_query_risk_graph():
+def build_input_guard_graph():
     graph = StateGraph(QueryRiskState)
 
     graph.add_node("policy_loader",  policy_loader_node)

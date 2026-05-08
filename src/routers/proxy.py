@@ -12,8 +12,8 @@ from src.services.safe_response_generator import generate_safe_response
 from src.services.sovereign_ai_client import SovereignAIClient
 from src.services.violation_reporter import report_violation
 from src.utils.agent_policies import resolve_agent_policy_ids
-from src.workflows.compliance_workflow import build_compliance_graph
-from src.workflows.query_risk_workflow import build_query_risk_graph
+from src.workflows.input_guard_workflow import build_input_guard_graph
+from src.workflows.response_guard_workflow import build_response_guard_graph
 
 router = APIRouter(prefix="/v1/proxy", tags=["proxy"])
 
@@ -40,9 +40,9 @@ async def proxy_chat(
     """
     PRD 외 편의 엔드포인트. 다음 3단계를 자동으로 묶음:
 
-    ① Feature 1 (질의 위험 감지) — query_risk_workflow 실행
+    ① Feature 1 (질의 위험 감지) — input_guard_workflow 실행
     ② BLOCKED 아니면 Sovereign AI 호출 (현재 데모용 Ollama)
-    ③ Feature 2 (응답 내규 검증) — compliance_workflow 실행 (audit_query_id 자동 연결)
+    ③ Feature 2 (응답 내규 검증) — response_guard_workflow 실행 (audit_query_id 자동 연결)
 
     호출자는 한 번의 API 호출로 전 과정 결과를 받을 수 있음.
     개별 단계 추적이 필요하면 query_audit_id / response_audit_id로 감사 로그 조회.
@@ -84,7 +84,7 @@ async def proxy_chat(
             )
 
     # ── ① Feature 1: 질의 위험 감지 (시스템 정책 고정) ────────
-    query_graph = build_query_risk_graph()
+    query_graph = build_input_guard_graph()
     q_final: dict = await query_graph.ainvoke({
         "agent_id":  request.agent_id,
         "query":     request.query,
@@ -136,7 +136,7 @@ async def proxy_chat(
 
     # ── ③ Feature 2: 응답 내규 검증 (audit_query_id 자동 연결) ──
     # ── ③ Feature 2: 응답 검증 (시스템 + 부서 정책 결합) ───────
-    compliance_graph = build_compliance_graph()
+    compliance_graph = build_response_guard_graph()
     r_final: dict = await compliance_graph.ainvoke({
         "agent_id":       request.agent_id,
         "query":          request.query,

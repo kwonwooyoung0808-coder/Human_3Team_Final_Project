@@ -17,7 +17,7 @@ from src.database.models import PolicyConversionLogModel, PolicyModel
 from src.schemas.doc_parser import PolicyConvertResponse
 from src.workflows.doc_parser_workflow import build_doc_parser_graph
 
-router = APIRouter(prefix="/v1/policy", tags=["policy-convert"])
+router = APIRouter(prefix="/v1/policy-compiler", tags=["policy-compiler"])
 
 
 def _preserve_failed_upload(tmp_path: str, original_filename: str) -> Path:
@@ -72,8 +72,8 @@ def _log_failed_conversion(
     return fail_marker
 
 
-@router.post("/convert", response_model=PolicyConvertResponse)
-async def policy_convert(
+@router.post("/compile", response_model=PolicyConvertResponse)
+async def policy_compile(
     file: UploadFile = File(...),
     policy_name: str = Form(...),
     effective_date: str = Form(...),

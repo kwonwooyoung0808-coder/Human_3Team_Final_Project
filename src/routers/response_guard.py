@@ -13,13 +13,13 @@ from src.schemas.compliance import (
 )
 from src.services.violation_reporter import report_violation
 from src.utils.agent_policies import resolve_agent_policy_ids
-from src.workflows.compliance_workflow import build_compliance_graph
+from src.workflows.response_guard_workflow import build_response_guard_graph
 
-router = APIRouter(prefix="/v1/response", tags=["response-compliance"])
+router = APIRouter(prefix="/v1/response-guard", tags=["response-guard"])
 
 
 @router.post("/validate", response_model=ResponseValidateResponse)
-async def response_validate(
+async def response_guard_validate(
     request: ResponseValidateRequest,
     db: Session = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
@@ -86,7 +86,7 @@ async def response_validate(
                 ),
             )
 
-    graph = build_compliance_graph()
+    graph = build_response_guard_graph()
     final: dict = await graph.ainvoke({
         "agent_id":       request.agent_id,
         "query":          request.query,

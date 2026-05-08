@@ -8,13 +8,13 @@ from src.core.dependencies import get_db, get_trace_id
 from src.database.models import AgentModel, PolicyModel
 from src.schemas.query_risk import QueryCheckRequest, QueryCheckResponse
 from src.services.violation_reporter import report_violation
-from src.workflows.query_risk_workflow import build_query_risk_graph
+from src.workflows.input_guard_workflow import build_input_guard_graph
 
-router = APIRouter(prefix="/v1/query", tags=["query-risk"])
+router = APIRouter(prefix="/v1/input-guard", tags=["input-guard"])
 
 
 @router.post("/check", response_model=QueryCheckResponse)
-async def query_check(
+async def input_guard_check(
     request: QueryCheckRequest,
     db: Session = Depends(get_db),
     trace_id: str = Depends(get_trace_id),
@@ -53,7 +53,7 @@ async def query_check(
             ),
         )
 
-    graph = build_query_risk_graph()
+    graph = build_input_guard_graph()
     final: dict = await graph.ainvoke({
         "agent_id":  request.agent_id,
         "query":     request.query,

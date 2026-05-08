@@ -373,7 +373,7 @@ def audit_logger_node(state: ComplianceState) -> dict:
 # 그래프 조립
 # ──────────────────────────────────────────────────────────────
 @lru_cache
-def build_compliance_graph():
+def build_response_guard_graph():
     graph = StateGraph(ComplianceState)
 
     graph.add_node("policy_loader",        policy_loader_node)

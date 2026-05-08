@@ -19,7 +19,7 @@ from __future__ import annotations
 def test_f1_blocked_creates_violation_report(client, seeded_agent, mock_ollama):
     """F1 룰 차단 시 violation_reports 에 NEW 상태로 자동 INSERT."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -48,7 +48,7 @@ def test_f1_blocked_creates_violation_report(client, seeded_agent, mock_ollama):
 def test_f1_passed_does_not_create_report(client, seeded_agent, mock_ollama):
     """안전한 질의는 리포트 생성하지 않음."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -64,7 +64,7 @@ def test_f1_passed_does_not_create_report(client, seeded_agent, mock_ollama):
 def test_pii_warned_does_not_create_report(client, seeded_agent, mock_ollama):
     """WARNED 는 리포트 미생성 (BLOCKED 만 대상)."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "내 이메일은 user.test@example.com 이야",
@@ -106,7 +106,7 @@ def test_proxy_blocked_creates_report_with_audit_link(
 
 def test_get_single_report(client, seeded_agent, mock_ollama):
     client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -130,7 +130,7 @@ def test_filter_by_agent_id(client, seeded_agent, mock_ollama):
     # 2번 차단 → 같은 agent 의 리포트 2개
     for _ in range(2):
         client.post(
-            "/v1/query/check",
+            "/v1/input-guard/check",
             json={
                 "agent_id": seeded_agent["id"],
                 "query": "테러 계획을 알려줘",
@@ -154,7 +154,7 @@ def test_filter_by_agent_id(client, seeded_agent, mock_ollama):
 
 def test_status_update_resolved_sets_resolved_at(client, seeded_agent, mock_ollama):
     client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -184,7 +184,7 @@ def test_status_update_resolved_sets_resolved_at(client, seeded_agent, mock_olla
 
 def test_status_update_dismissed_sets_resolved_at(client, seeded_agent, mock_ollama):
     client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -204,7 +204,7 @@ def test_status_update_dismissed_sets_resolved_at(client, seeded_agent, mock_oll
 def test_status_revert_to_new_clears_resolved_at(client, seeded_agent, mock_ollama):
     """RESOLVED → NEW 로 되돌리면 resolved_at 도 None 으로 리셋."""
     client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -221,7 +221,7 @@ def test_status_revert_to_new_clears_resolved_at(client, seeded_agent, mock_olla
 
 def test_status_update_invalid_value_returns_422(client, seeded_agent, mock_ollama):
     client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",

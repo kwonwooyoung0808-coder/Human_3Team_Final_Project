@@ -208,7 +208,7 @@ def test_f2_uses_group_member_policies(client, seeded_agent, mock_ollama):
     client.post(f"/api/agents/{seeded_agent['id']}/policy-groups", json={"group_id": "GF2"})
 
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "안녕하세요",

@@ -9,12 +9,12 @@ from src.routers import (
     agents,
     audit,
     evaluate,
+    input_guard,
     inquiry,
-    policy_convert,
+    policy_compiler,
     policy_groups,
     proxy,
-    query_check,
-    response_validate,
+    response_guard,
     runs,
     violation_reports,
     violations,
@@ -46,10 +46,10 @@ app.include_router(violations.router)
 app.include_router(audit.router)
 app.include_router(audit.query_audit_router)  # /v1/audit/query/{id}, /v1/audit/response/{id}
 
-# Feature 1/2/3 신규 라우터
-app.include_router(query_check.router)
-app.include_router(response_validate.router)
-app.include_router(policy_convert.router)
+# Feature 1/2/3 신규 라우터 (PRD §3 명명규칙 정합)
+app.include_router(input_guard.router)
+app.include_router(response_guard.router)
+app.include_router(policy_compiler.router)
 
 # PRD 9 Agent Management + Proxy 편의 엔드포인트
 app.include_router(agents.router)

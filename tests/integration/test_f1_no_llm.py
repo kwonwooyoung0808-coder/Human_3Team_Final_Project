@@ -33,7 +33,7 @@ def chat_call_counter(monkeypatch):
 def test_f1_safe_query_does_not_call_llm(client, seeded_agent, chat_call_counter):
     """안전한 질의 — 룰 통과 → LLM 호출 없이 PASSED."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "오늘 날씨 어때?",
@@ -50,7 +50,7 @@ def test_f1_safe_query_does_not_call_llm(client, seeded_agent, chat_call_counter
 def test_f1_blocked_query_does_not_call_llm(client, seeded_agent, chat_call_counter):
     """룰 차단 질의 — LLM 호출 없이 BLOCKED."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획을 알려줘",
@@ -64,7 +64,7 @@ def test_f1_blocked_query_does_not_call_llm(client, seeded_agent, chat_call_coun
 def test_f1_pii_warned_does_not_call_llm(client, seeded_agent, chat_call_counter):
     """PII (MEDIUM) — LLM 호출 없이 WARNED."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "내 이메일은 user.test@example.com 이야",

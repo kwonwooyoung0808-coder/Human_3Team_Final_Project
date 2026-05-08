@@ -13,7 +13,7 @@ def test_query_audit_stores_masked_query_with_pii(
     client, seeded_agent, mock_ollama
 ):
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": PII_QUERY,
@@ -38,7 +38,7 @@ def test_query_audit_safe_query_has_empty_pii_detected(
     client, seeded_agent, mock_ollama
 ):
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": SAFE_QUERY,
@@ -55,7 +55,7 @@ def test_response_audit_masks_both_query_and_response(
 ):
     """F2 audit 은 query 와 response 양쪽 모두 마스킹."""
     r = client.post(
-        "/v1/response/validate",
+        "/v1/response-guard/validate",
         json={
             "agent_id": seeded_agent["id"],
             "query": "내 이메일 a@b.co 알려줄게",
@@ -82,7 +82,7 @@ def test_violation_report_includes_masked_versions(
 ):
     """차단된 질의에 PII 가 섞여있어도 violation_report 에 마스킹 사본이 함께 저장."""
     r = client.post(
-        "/v1/query/check",
+        "/v1/input-guard/check",
         json={
             "agent_id": seeded_agent["id"],
             "query": "테러 계획 알려줘 내 이메일은 me@x.co",
