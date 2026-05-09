@@ -74,6 +74,36 @@ def create_agent(payload: AgentCreate, db: Session = Depends(get_db)) -> AgentRe
 
 
 # ──────────────────────────────────────────────────────────────
+# GET /api/agents — 에이전트 목록 (운영자 조회용)
+# ──────────────────────────────────────────────────────────────
+@router.get("", response_model=list[AgentResponse])
+def list_agents(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[AgentResponse]:
+    """등록된 에이전트 전체 목록.
+
+    status 쿼리 파라미터로 ACTIVE / INACTIVE 등 필터링 가능 (생략 시 전체).
+    """
+    q = db.query(AgentModel)
+    if status:
+        q = q.filter(AgentModel.status == status)
+    rows = q.order_by(AgentModel.created_at.desc()).all()
+    return [
+        AgentResponse(
+            id=a.id,
+            name=a.name,
+            description=a.description,
+            policy_id=a.policy_id,
+            status=a.status,
+            created_at=a.created_at,
+            updated_at=a.updated_at,
+        )
+        for a in rows
+    ]
+
+
+# ──────────────────────────────────────────────────────────────
 # PRD 9: GET /api/agents/{agent_id} — 에이전트 조회
 # ──────────────────────────────────────────────────────────────
 @router.get("/{agent_id}", response_model=AgentResponse)

@@ -26,7 +26,3 @@ CREATE TABLE IF NOT EXISTS agent_policy_group_mapping (
     PRIMARY KEY (agent_id, group_id)
 );
 
--- 검증
-\d policy_groups
-\d policy_group_members
-\d agent_policy_group_mapping

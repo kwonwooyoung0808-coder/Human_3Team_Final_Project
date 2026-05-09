@@ -26,6 +26,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # 데이터 주권 가드 (fail-fast): SOVEREIGN_AI_URL 이 사내 허용 호스트가 아니면
+    # 앱 시작 자체를 거부 — 첫 요청 기다리지 않고 즉시 운영자에게 알림.
+    from src.services.sovereign_ai_client import _validate_sovereign_url
+    _validate_sovereign_url(settings.sovereign_ai_url)
+
     app.state.db_available = init_db()
     yield
 

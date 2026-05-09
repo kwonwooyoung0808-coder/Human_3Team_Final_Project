@@ -50,7 +50,3 @@ WHERE NOT EXISTS (
     WHERE pv.policy_id = p.id AND pv.is_current = TRUE
 );
 
--- 검증
-\d policy_versions
-\d query_audit_logs
-SELECT policy_id, version, is_current FROM policy_versions ORDER BY policy_id, version;
