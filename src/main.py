@@ -9,6 +9,7 @@ from src.routers import (
     agents,
     audit,
     evaluate,
+    health,
     input_guard,
     inquiry,
     policy_compiler,
@@ -38,13 +39,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 
-@app.get("/health", tags=["health"])
-def health() -> dict[str, str | bool]:
-    return {
-        "status": "ok",
-        "db_available": getattr(app.state, "db_available", False),
-    }
-
+# 운영 모니터링 (basic /health + cache/system/llm 확장)
+app.include_router(health.router)
 
 app.include_router(evaluate.router)
 app.include_router(runs.router)
