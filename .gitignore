@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# !import.log
+# 깃에 올라가야 하는 파일이 있으면, 파일명 앞에 ! 추가하면 업로드 됩니다.
+
+# Local environment
+.env
+.venv/
+env/
+venv/
+
+# DB
+*.sqlite
+governance.db
+
+# policy
+policymd/
+
+# Policy Compiler 런타임 산출물 (변환 실패 .docx 보존 위치)
+src/policies/failed_uploads/
+
+# IDE
+.vscode/

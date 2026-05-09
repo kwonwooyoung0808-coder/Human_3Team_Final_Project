@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeAgent Deployment Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">SAFEAGENT SELF-HOSTED DELIVERY</p>
+        <h1>배포와 업데이트를 한 화면에서 관리하는 포털</h1>
+        <p class="hero-text">
+          회사별 독립 서버 배포를 기준으로, 현재 버전 확인부터 배포 파일 다운로드,
+          다음 단계의 승인형 업데이트 흐름까지 이어질 수 있도록 구성했습니다.
+        </p>
+      </div>
+      <div class="hero-panel">
+        <p class="panel-label">현재 운영 상태</p>
+        <div class="version-row">
+          <span>현재 버전</span>
+          <strong id="current-version">v0.1.0</strong>
+        </div>
+        <div class="version-row">
+          <span>채널</span>
+          <strong id="channel-name">stable</strong>
+        </div>
+        <div class="version-row">
+          <span>마지막 확인</span>
+          <strong id="last-checked">2026-05-09 15:10:00 KST</strong>
+        </div>
+        <div class="status-chip">Self-Hosted Ready</div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card card-wide">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Release Overview</p>
+            <h2>현재 운영 정보와 최신 배포 정보</h2>
+          </div>
+          <button class="ghost-button" id="refresh-release" type="button">최신 버전 확인</button>
+        </div>
+        <div class="overview-grid">
+          <article class="info-block">
+            <p class="block-label">현재 운영 버전</p>
+            <h3 id="current-version-card">v0.1.0</h3>
+            <ul class="detail-list" id="current-details">
+              <li>배포 채널: stable</li>
+              <li>배포 형식: Docker Compose</li>
+              <li>운영 모델: 회사별 독립 서버</li>
+            </ul>
+          </article>
+          <article class="info-block accent-block">
+            <p class="block-label">최신 배포본</p>
+            <h3 id="latest-version-card">v0.2.0</h3>
+            <ul class="detail-list" id="latest-details">
+              <li>배포일: 2026-05-09 15:00:00 KST</li>
+              <li>중요도: Recommended</li>
+              <li>DB 마이그레이션: 필요</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Change Summary</p>
+            <h2>변경사항 요약</h2>
+          </div>
+        </div>
+        <div class="summary-list" id="summary-list">
+          <div class="summary-item">
+            <span class="summary-tag">v0.2.0</span>
+            <p>정책 버전 관리와 감사 추적 흐름 정리, 운영자 기준 배포 포털 초안 추가</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Downloads</p>
+            <h2>배포 패키지 다운로드</h2>
+          </div>
+        </div>
+        <div class="download-grid">
+          <a class="download-card primary" id="bundle-download" href="./downloads/safeagent-deployment-bundle.zip" download>
+            <span class="download-type">통합 배포 파일</span>
+            <strong>배포 번들 ZIP 받기</strong>
+            <p>배포에 필요한 파일을 한 번에 받을 수 있는 통합 ZIP 파일입니다.</p>
+          </a>
+          <a class="download-card primary" href="./downloads/safeagent-release-manifest.json" download>
+            <span class="download-type">배포 메타데이터</span>
+            <strong>배포 정보 JSON 받기</strong>
+            <p>버전, 변경사항, 검증 대상 파일 목록을 확인하는 기준 파일</p>
+          </a>
+          <a class="download-card" href="./downloads/docker-compose.release.yml" download>
+            <span class="download-type">배포 템플릿</span>
+            <strong>docker-compose 배포 예시 받기</strong>
+            <p>고객사 서버에서 바로 참조할 수 있는 배포용 compose 템플릿</p>
+          </a>
+          <a class="download-card" href="./downloads/.env.release.example" download>
+            <span class="download-type">환경설정</span>
+            <strong>환경설정 예시 파일 받기</strong>
+            <p>앱 버전, DB 연결, 업데이트 채널 등 운영 필수 값 예시</p>
+          </a>
+          <a class="download-card" href="./downloads/install-guide.md" download>
+            <span class="download-type">설치 가이드</span>
+            <strong>설치 및 반영 가이드 받기</strong>
+            <p>다운로드 후 서버 반영 순서를 단계별로 정리한 운영 가이드</p>
+          </a>
+        </div>
+        <p class="download-note">
+          실제 Docker 이미지 `.tar` 또는 레지스트리 태그는 추후 릴리즈 파이프라인과 연결하면 이 영역에 그대로 추가할 수 있습니다.
+        </p>
+      </section>
+
+      <section class="card card-wide">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Install Flow</p>
+            <h2>설치 및 반영 절차</h2>
+          </div>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span>01</span>
+            <p>배포 포털에서 manifest, compose, env 예시, 설치 가이드를 다운로드합니다.</p>
+          </div>
+          <div class="step">
+            <span>02</span>
+            <p>서버 운영 환경에 맞게 `.env`를 작성하고 compose 파일의 이미지 태그를 확인합니다.</p>
+          </div>
+          <div class="step">
+            <span>03</span>
+            <p>온라인 환경이면 레지스트리에서 pull, 오프라인 환경이면 `docker load`로 이미지를 반영합니다.</p>
+          </div>
+          <div class="step">
+            <span>04</span>
+            <p>`docker compose up -d` 후 필요 시 마이그레이션을 실행하고 헬스체크를 확인합니다.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Future Update Flow</p>
+            <h2>추후 확장할 업데이트 기능</h2>
+          </div>
+        </div>
+        <div class="future-actions">
+          <button type="button" class="ghost-button" disabled>업데이트 적용</button>
+          <button type="button" class="ghost-button" disabled>롤백</button>
+          <button type="button" class="ghost-button" disabled>서명 검증 결과</button>
+        </div>
+        <p class="muted">
+          현재는 다운로드 중심 포털입니다. 다음 단계에서 관리자 수락 후 자동 적용, 진행 상태 표시, 업데이트 이력 API를 연결하면 됩니다.
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">History</p>
+            <h2>다운로드 / 배포 이력 예시</h2>
+          </div>
+        </div>
+        <div class="history-table" id="history-table">
+          <div class="history-row history-head">
+            <span>일시</span>
+            <span>버전</span>
+            <span>작업</span>
+            <span>상태</span>
+          </div>
+          <div class="history-row">
+            <span>2026-05-09 15:10:00 KST</span>
+            <span>v0.2.0</span>
+            <span>배포 파일 다운로드 준비</span>
+            <span class="ok">Ready</span>
+          </div>
+          <div class="history-row">
+            <span>2026-05-09 14:30:00 KST</span>
+            <span>v0.1.0</span>
+            <span>최초 Self-Hosted 배포</span>
+            <span class="ok">Completed</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
