@@ -1,13 +1,17 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
-from src.core.config import get_settings
+from src.core.config import _validate_auth_settings, get_settings
+from src.core.dependencies import require_api_key, require_role
 from src.database.connection import init_db
+from src.services.sovereign_ai_client import _validate_sovereign_url
 from src.routers import (
     agents,
+    api_keys,
     audit,
+    auth,
     evaluate,
     health,
     input_guard,
@@ -29,8 +33,9 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 데이터 주권 가드 (fail-fast): SOVEREIGN_AI_URL 이 사내 허용 호스트가 아니면
     # 앱 시작 자체를 거부 — 첫 요청 기다리지 않고 즉시 운영자에게 알림.
-    from src.services.sovereign_ai_client import _validate_sovereign_url
     _validate_sovereign_url(settings.sovereign_ai_url)
+    # 인증 설정 검증 (RFC 7518 §3.2 JWT_SECRET 32B+ / 운영 환경 약한 admin pw 차단)
+    _validate_auth_settings(settings)
 
     app.state.db_available = init_db()
     yield
@@ -39,24 +44,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 
-# 운영 모니터링 (basic /health + cache/system/llm 확장)
+# Phase 4 인증 적용 패턴:
+#   - 공개: /health, /v1/auth/login, /v1/auth/refresh
+#   - API Key (머신): /v1/input-guard, /v1/response-guard, /v1/proxy, /api/v1/evaluate
+#   - JWT (사람, 모든 role): 그 외 관리/조회 API
+#   - 세분화 role: api_keys.router 는 per-endpoint 적용 / 정책 활성화 admin-only 는 Phase 5
+_jwt_any = [Depends(require_role("admin", "operator", "viewer"))]
+_machine = [Depends(require_api_key)]
+
+# 운영 모니터링 (공개 — 헬스체크는 인증 없이 도달 가능해야 함)
 app.include_router(health.router)
 
-app.include_router(evaluate.router)
-app.include_router(runs.router)
-app.include_router(violations.router)
-app.include_router(audit.router)
-app.include_router(audit.query_audit_router)  # /v1/audit/query/{id}, /v1/audit/response/{id}
+# Phase 4: 인증 (login/refresh 는 자체 공개, me/password 는 내부적으로 토큰 검증)
+app.include_router(auth.router)
 
-# Feature 1/2/3 신규 라우터 (PRD §3 명명규칙 정합)
-app.include_router(input_guard.router)
-app.include_router(response_guard.router)
-app.include_router(policy_compiler.router)
+# 게이트웨이 흐름 — Sovereign AI Agent (머신) 가 호출. API Key 인증.
+app.include_router(input_guard.router, dependencies=_machine)
+app.include_router(response_guard.router, dependencies=_machine)
+app.include_router(proxy.router, dependencies=_machine)
+app.include_router(evaluate.router, dependencies=_jwt_any)  # 레거시 평가 도구 (관리자용)
 
-# PRD 9 Agent Management + Proxy 편의 엔드포인트
-app.include_router(agents.router)
-app.include_router(proxy.router)
-app.include_router(inquiry.router)
-app.include_router(violation_reports.router)
-app.include_router(policy_groups.router)
-app.include_router(policy_versions.router)
+# 관리 / 조회 API — JWT 필요 (모든 role 허용, 세분화는 Phase 5)
+app.include_router(runs.router, dependencies=_jwt_any)
+app.include_router(violations.router, dependencies=_jwt_any)
+app.include_router(audit.router, dependencies=_jwt_any)
+app.include_router(audit.query_audit_router, dependencies=_jwt_any)
+app.include_router(policy_compiler.router, dependencies=_jwt_any)
+app.include_router(agents.router, dependencies=_jwt_any)
+app.include_router(inquiry.router, dependencies=_jwt_any)
+app.include_router(violation_reports.router, dependencies=_jwt_any)
+app.include_router(policy_groups.router, dependencies=_jwt_any)
+app.include_router(policy_versions.router, dependencies=_jwt_any)
+
+# api_keys.router 는 per-endpoint role 체크가 이미 적용됨.
+app.include_router(api_keys.router)

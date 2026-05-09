@@ -8,7 +8,7 @@ PRD 5.2.6 수용 기준 검증:
 from __future__ import annotations
 
 
-def test_unregistered_agent_returns_422(client):
+def test_unregistered_agent_returns_422(client, seeded_agent):
     r = client.post(
         "/v1/response-guard/validate",
         json={
@@ -134,7 +134,7 @@ def test_rule_rejected_violations_preserved_in_audit(client, seeded_agent, mock_
     assert audit["violations"], f"rule_rejected 경로 audit 에 violations 누락: {audit}"
 
 
-def test_audit_query_id_agent_mismatch_returns_422(client, mock_ollama):
+def test_audit_query_id_agent_mismatch_returns_422(client, seeded_agent, mock_ollama):
     """
     F2-4: 다른 에이전트의 query audit 을 본 에이전트의 response audit 에 연결 시도 → 422.
     """

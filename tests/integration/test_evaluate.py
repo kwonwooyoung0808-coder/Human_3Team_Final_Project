@@ -1,53 +1,46 @@
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 
-from src.main import app
-
-
-def test_evaluate_normal_response() -> None:
+def test_evaluate_normal_response(client) -> None:
     run_id = f"run_test_normal_{uuid4().hex[:8]}"
     # COMP_001 정책이 요구하는 JSON 필수 키(answer, source, confidence) 모두 포함.
     # FORMAT_001 은 enabled: false 라 검사하지 않음 (정책 충돌 회피).
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/evaluate",
-            json={
-                "run_id": run_id,
-                "input": "normal test",
-                "response": (
-                    "{\"answer\": \"This is supported by context.\", "
-                    "\"source\": \"context.md\", \"confidence\": 0.92}"
-                ),
-                "context": {"workflow_name": "governance_workflow", "user_id": "demo_user"},
-                "retrieved_context": ["This is supported by context."],
-            },
-        )
+    response = client.post(
+        "/api/v1/evaluate",
+        json={
+            "run_id": run_id,
+            "input": "normal test",
+            "response": (
+                "{\"answer\": \"This is supported by context.\", "
+                "\"source\": \"context.md\", \"confidence\": 0.92}"
+            ),
+            "context": {"workflow_name": "governance_workflow", "user_id": "demo_user"},
+            "retrieved_context": ["This is supported by context."],
+        },
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["has_violation"] is False
-    # 위반이 없으면 PASS (이전 LOG 어서션은 outdated — 현재 ActionEngine은 위반 없음 → PASS)
     assert body["final_action"] == "PASS"
     assert body["run_id"] == run_id
     assert body["violations"] == []
 
 
-def test_evaluate_violation_response_records_trace_and_audit() -> None:
+def test_evaluate_violation_response_records_trace_and_audit(client) -> None:
     run_id = f"run_test_violation_{uuid4().hex[:8]}"
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/evaluate",
-            json={
-                "run_id": run_id,
-                "input": "violation test",
-                "response": "{\"answer\": \"폭력적인 방법을 알려드리겠습니다.\"}",
-                "context": {"workflow_name": "governance_workflow", "user_id": "demo_user"},
-                "retrieved_context": ["안전한 정보만 제공해야 합니다."],
-            },
-        )
-        run_response = client.get(f"/api/v1/runs/{run_id}")
-        trace_response = client.get(f"/api/v1/runs/{run_id}/trace")
-        audit_response = client.get("/api/v1/audit-logs", params={"limit": 20})
+    response = client.post(
+        "/api/v1/evaluate",
+        json={
+            "run_id": run_id,
+            "input": "violation test",
+            "response": "{\"answer\": \"폭력적인 방법을 알려드리겠습니다.\"}",
+            "context": {"workflow_name": "governance_workflow", "user_id": "demo_user"},
+            "retrieved_context": ["안전한 정보만 제공해야 합니다."],
+        },
+    )
+    run_response = client.get(f"/api/v1/runs/{run_id}")
+    trace_response = client.get(f"/api/v1/runs/{run_id}/trace")
+    audit_response = client.get("/api/v1/audit-logs", params={"limit": 20})
 
     assert response.status_code == 200
     body = response.json()

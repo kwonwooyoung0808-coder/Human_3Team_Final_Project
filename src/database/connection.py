@@ -30,10 +30,68 @@ def init_db() -> bool:
     try:
         Base.metadata.create_all(bind=engine)
         seed_existing_policies()
+        seed_bootstrap_admin()
         return True
     except SQLAlchemyError as exc:
         logger.warning("Database initialization skipped because the database is unavailable: %s", exc)
         return False
+
+
+def seed_bootstrap_admin() -> None:
+    """Phase 4: 최초 부팅 시 admin 계정이 없으면 자동 생성 (멱등).
+
+    설계:
+      - 비밀번호는 BOOTSTRAP_ADMIN_PASSWORD 환경변수 (기본 'changeme').
+      - bcrypt 해시는 코드에서 생성 — SQL 마이그레이션에 정적 해시 박지 않음.
+      - 운영 환경 (APP_ENV=production) 에서 약한 비밀번호는 _validate_auth_settings
+        에서 이미 기동 시점에 차단됨. 여기까지 도달하면 안전한 비밀번호.
+      - IntegrityError (다른 워커가 동시에 생성) 는 정상 멱등 케이스 — 무시.
+      - 그 외 SQL/일반 오류는 ERROR 로그 후 throw 안 함 (앱 기동은 계속).
+    """
+    import uuid as _uuid
+    from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+    from src.core.auth import hash_password
+    from src.database.models import UserModel
+
+    session = SessionLocal()
+    try:
+        existing = (
+            session.query(UserModel)
+            .filter(UserModel.username == settings.bootstrap_admin_username)
+            .first()
+        )
+        if existing:
+            return
+
+        session.add(
+            UserModel(
+                id=f"user-{_uuid.uuid4()}",
+                username=settings.bootstrap_admin_username,
+                hashed_password=hash_password(settings.bootstrap_admin_password),
+                role="admin",
+                policy_groups=[],
+                is_active=True,
+            )
+        )
+        session.commit()
+        # OWASP A02:2025 권고 — 기본 자격증명 생성은 WARNING 이상으로 기록.
+        logger.warning(
+            "[SECURITY] Bootstrap admin '%s' created with initial credentials. "
+            "MANDATORY: Change password before production use.",
+            settings.bootstrap_admin_username,
+        )
+    except IntegrityError:
+        # 동시 다중 워커 환경에서 race — 다른 워커가 먼저 시드함. 정상.
+        session.rollback()
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error("[SECURITY] Bootstrap admin seed failed (DB error): %s", e)
+    except Exception as e:
+        session.rollback()
+        logger.error("[SECURITY] Bootstrap admin seed failed (unexpected): %s", e)
+    finally:
+        session.close()
 
 
 def seed_existing_policies() -> None:

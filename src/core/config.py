@@ -72,6 +72,46 @@ class Settings(BaseModel):
         os.getenv("SAFE_RESPONSE_LLM_TEMPERATURE", "0.3")
     )
 
+    # ── 환경 구분 ──
+    # development | production. 운영 환경에서는 추가 보안 검증 활성화.
+    app_env: str = os.getenv("APP_ENV", "development").lower()
+
+    # ── Phase 4: 인증/권한 ──
+    # JWT_SECRET 은 운영 환경에서 반드시 32바이트 이상 랜덤 문자열로 교체 (RFC 7518 §3.2).
+    jwt_secret: str = os.getenv(
+        "JWT_SECRET", "dev-only-secret-change-me-in-production-32bytes-min"
+    )
+    jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    jwt_access_token_ttl_minutes: int = int(os.getenv("JWT_ACCESS_TOKEN_TTL_MINUTES", "60"))
+    jwt_refresh_token_ttl_days: int = int(os.getenv("JWT_REFRESH_TOKEN_TTL_DAYS", "7"))
+    bootstrap_admin_username: str = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin")
+    bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "changeme")
+
+
+# ──────────────────────────────────────────────────────────────
+# 시작 시 보안 검증 (fail-fast)
+# RFC 7518 §3.2 / 운영 환경 약한 패스워드 차단
+# ──────────────────────────────────────────────────────────────
+_WEAK_BOOTSTRAP_PASSWORDS = {"changeme", "admin", "password", "1234", "", "test"}
+
+
+def _validate_auth_settings(settings: "Settings") -> None:
+    """JWT_SECRET 길이 + 운영 환경 약한 admin 비밀번호 차단."""
+    if len(settings.jwt_secret.encode("utf-8")) < 32:
+        raise ValueError(
+            "JWT_SECRET 이 RFC 7518 §3.2 최소 요건(32바이트) 미달. "
+            f"현재 {len(settings.jwt_secret.encode('utf-8'))}바이트. "
+            "생성 예: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    if (
+        settings.app_env == "production"
+        and settings.bootstrap_admin_password.lower() in _WEAK_BOOTSTRAP_PASSWORDS
+    ):
+        raise ValueError(
+            "운영 환경(APP_ENV=production)에서 BOOTSTRAP_ADMIN_PASSWORD 가 "
+            "취약한 기본값입니다. 강력한 비밀번호로 교체하세요."
+        )
+
 
 @lru_cache
 def get_settings() -> Settings:

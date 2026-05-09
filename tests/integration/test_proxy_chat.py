@@ -107,7 +107,7 @@ def test_proxy_blocked_returns_safe_response_matching_violation_type(
     assert "운영 지침" in body["safe_response"] or "우회" in body["safe_response"]
 
 
-def test_proxy_returns_422_for_unregistered_agent(client):
+def test_proxy_returns_422_for_unregistered_agent(client, seeded_agent):
     r = client.post(
         "/v1/proxy/chat",
         json={

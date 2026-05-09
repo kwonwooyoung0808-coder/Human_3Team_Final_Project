@@ -285,6 +285,42 @@ class PolicyVersionModel(Base):
     )
 
 
+class UserModel(Base):
+    """Phase 4: 인증 — 관리/조회 권한자 (admin / operator / viewer).
+
+    JWT 발급 대상. policy_groups 는 Phase 2 부서 스코프 확장 대비.
+    """
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(20), default="viewer", index=True)
+    policy_groups: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ApiKeyModel(Base):
+    """Phase 4: 인증 — Sovereign AI Agent (머신) 가 게이트웨이 호출에 사용.
+
+    실제 키는 저장하지 않고 SHA-256 해시만 보관. 분실 시 재발급.
+    """
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, index=True)
+    agent_id: Mapped[str] = mapped_column(
+        String(80), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class PolicyConversionLogModel(Base):
     __tablename__ = "policy_conversion_logs"
 

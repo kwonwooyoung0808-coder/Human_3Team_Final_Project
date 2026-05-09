@@ -8,7 +8,7 @@ PRD 5.1.6 수용 기준 검증:
 from __future__ import annotations
 
 
-def test_unregistered_agent_returns_422(client):
+def test_unregistered_agent_returns_422(client, seeded_agent):
     r = client.post(
         "/v1/input-guard/check",
         json={
